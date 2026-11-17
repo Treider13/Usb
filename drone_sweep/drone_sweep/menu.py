@@ -234,6 +234,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dispatch(args: list[str]) -> int:
+    if args and args[0] == "setup":
+        from .setup_cli import main as setup_main
+
+        return setup_main(args[1:])
     if args and args[0] == "serve":
         from .webapp import ServeError, serve
 
@@ -276,7 +280,7 @@ def _dispatch(args: list[str]) -> int:
         return 0
     print(explain_text())
     print(
-        "Команды: strela, strela explain, strela serve --port 8765, strela assemble ..., "
+        "Команды: strela setup, strela serve --port 8765, strela explain, strela assemble ..., "
         "strela diff a.json b.json, "
         "strela elrs uid|dump|crack|lookup|lookup-memory|fetch-wordlist|build-rainbow|build-memory ..."
     )

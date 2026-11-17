@@ -115,8 +115,10 @@ def render_elrs_resources_html() -> str:
 <thead><tr><th>Пресет CLI</th><th>Описание</th><th>URL</th></tr></thead>
 <tbody>{preset_rows}</tbody>
 </table>
-<p class="help">Скачать: <code>strela elrs fetch-wordlist passhelp --out words.txt</code> затем
-<code>strela elrs build-memory words.txt --out elrs-table.json</code> (быстрый lookup на /crack).</p>
+<p class="help">При установке: <code>strela setup</code> (или <code>install.sh</code>) — скачивает
+<code>passhelp</code> и строит RAM-таблицу. Вручную:
+<code>strela elrs fetch-wordlist passhelp --out words.txt</code>,
+<code>strela elrs build-memory words.txt --out elrs-table.json</code>.</p>
 <h3 class="section">Кто ещё реализовал</h3>
 <table class="top-table">
 <thead><tr><th>Проект</th><th>Зачем</th></tr></thead>

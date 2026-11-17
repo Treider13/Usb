@@ -97,7 +97,7 @@ def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
 </div>
 <article class="panel wide">
 <h2>Binding phrase из образа ELRS</h2>
-<p class="help">Без пароля Wi‑Fi: загрузите дамп flash и словарь фраз с этого компьютера.</p>
+<p class="help">Без пароля Wi‑Fi: загрузите дамп flash. Словарь подхватится из <code>strela setup</code>, если установка уже была.</p>
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="phrase_from_flash">
 <label>Образ .bin / Intel HEX <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
@@ -211,14 +211,30 @@ def form_page() -> bytes:
     return page(f"{APP_NAME} — файлы", inner, connect=connect_bar(), current="/assemble").encode("utf-8")
 
 
+def _bundled_elrs_defaults() -> dict[str, str]:
+    from .strela_bootstrap import default_binding_paths
+
+    return {key: str(path) for key, path in default_binding_paths().items()}
+
+
 def crack_page(result: str = "", prefill_uid: str = "") -> bytes:
     result_block = f'<section class="report">{result}</section>' if result else ""
     uid_value = html.escape(prefill_uid)
+    bundled = _bundled_elrs_defaults()
+    bundled_wordlist = html.escape(bundled.get("wordlist", ""))
+    bundled_table = html.escape(bundled.get("memory_table", ""))
+    bundled_note = ""
+    if bundled:
+        bundled_note = (
+            "<p class='help'>Словарь из установки: "
+            f"<code>{bundled_wordlist or bundled_table}</code> — можно не выбирать файл, если <code>strela setup</code> уже выполнен.</p>"
+        )
     inner = f"""
 <h1>Подбор</h1>
 <p class="lede">Словари и ссылки — <a href="/top2026#elrs-wordlists">ТОП 2026 → ELRS</a>. Как <a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL Drone-Forensic elrs/</a>:
 UID из binding phrase, JSON из flash, подбор фразы. Работает для <strong>ExpressLRS</strong> и <strong>MILELRS</strong>.
 <strong>OrangeRX</strong> — протокол DSM, сюда не подходит. Пароль Wi‑Fi не нужен — нужен словарь binding phrase.</p>
+{bundled_note}
 {result_block}
 <article class="panel wide panel-accent">
 <h2>Фраза из образа за один шаг</h2>
@@ -227,9 +243,9 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 <label>Образ с ПК <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
 <span class="help">или путь <input name="flash_path"></span>
 <label>Словарь с ПК <input type="file" name="binding_wordlist_file" accept=".txt,.lst"></label>
-<span class="help">или путь <input name="binding_wordlist"></span>
+<span class="help">или путь <input name="binding_wordlist" value="{bundled_wordlist}"></span>
 <label>JSON RAM-таблица <input type="file" name="memory_table_file" accept=".json"></label>
-<span class="help">или путь <input name="memory_table"></span>
+<span class="help">или путь <input name="memory_table" value="{bundled_table}"></span>
 <p><button type="submit">UID из образа → binding phrase</button></p>
 </form>
 </article>
@@ -257,9 +273,9 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 <input type="hidden" name="action" value="crack">
 <label>UID (через запятую или hex) <input name="uid" value="{uid_value}" placeholder="79,4,253,130,33,85"></label>
 <label>Словарь с ПК <input type="file" name="binding_wordlist_file" accept=".txt,.lst"></label>
-<span class="help">или путь <input name="binding_wordlist"></span>
+<span class="help">или путь <input name="binding_wordlist" value="{bundled_wordlist}"></span>
 <label>JSON таблица <input type="file" name="memory_table_file" accept=".json"></label>
-<span class="help">или путь <input name="memory_table"></span>
+<span class="help">или путь <input name="memory_table" value="{bundled_table}"></span>
 <p><button type="submit">Подобрать</button></p>
 </form>
 </article>
@@ -349,6 +365,11 @@ class StrelaHandler(BaseHTTPRequestHandler):
             self._send(400, page("Нужна папка", "<h1>Укажите папку отчёта</h1><p><a class=\"action\" href=\"/assemble\">Назад к форме</a></p>").encode("utf-8"))
             return
         merged = merge_uploaded_paths(form, files, _ASSEMBLE_FILE_KEYS)
+        bundled = _bundled_elrs_defaults()
+        if not merged.get("binding_wordlist", "").strip() and bundled.get("wordlist"):
+            merged["binding_wordlist"] = bundled["wordlist"]
+        if not merged.get("binding_memory_table", "").strip() and bundled.get("memory_table"):
+            merged["binding_memory_table"] = bundled["memory_table"]
         card = assemble(inputs_from_answers(merged))
         saved = write_report(card, Path(form["out"].strip()))
         self._send(200, render_html(card, saved_path=str(saved)).encode("utf-8"))
@@ -399,6 +420,9 @@ def crack_response(form: dict[str, str], files: dict | None = None) -> bytes:
 
 
 def serve(port: int = 8765) -> None:
+    from .strela_bootstrap import ensure_setup
+
+    ensure_setup(quiet=True)
     try:
         server = ThreadingHTTPServer(("127.0.0.1", port), StrelaHandler)
     except OSError as exc:

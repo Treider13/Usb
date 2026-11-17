@@ -14,7 +14,26 @@ from .elrs_binding import binding_phrase_to_uid, parse_uid_field, uid_bytes_to_h
 from .elrs_rainbow import build_memory_table, save_memory_table
 from .menu import write_report
 from .report import render_html
+from .strela_bootstrap import default_binding_paths
 from .webapp_forms import Uploaded, resolve_upload_path
+
+
+def _bundled_wordlist() -> Path | None:
+    return default_binding_paths().get("wordlist")
+
+
+def _bundled_memory_table() -> Path | None:
+    return default_binding_paths().get("memory_table")
+
+
+def _resolve_wordlist(form: dict[str, str], uploads: Mapping[str, Uploaded]) -> Path | None:
+    path = resolve_upload_path(form, uploads, "binding_wordlist_file", "binding_wordlist")
+    return path if path is not None else _bundled_wordlist()
+
+
+def _resolve_memory_table(form: dict[str, str], uploads: Mapping[str, Uploaded]) -> Path | None:
+    path = resolve_upload_path(form, uploads, "memory_table_file", "memory_table")
+    return path if path is not None else _bundled_memory_table()
 
 
 def _path_field(form: dict[str, str], key: str) -> Path | None:
@@ -112,13 +131,13 @@ def handle_elrs_form(
             return bool(summary.get("extracted")), dump_block + uid_line, uid_text or ""
         if uid_text is None:
             return False, dump_block + "<p class='hole'>В образе не найден UID из шести байт.</p>", ""
-        wordlist = resolve_upload_path(form, uploads, "binding_wordlist_file", "binding_wordlist")
-        memory = resolve_upload_path(form, uploads, "memory_table_file", "memory_table")
+        wordlist = _resolve_wordlist(form, uploads)
+        memory = _resolve_memory_table(form, uploads)
         if wordlist is None and memory is None:
             return (
                 False,
                 dump_block
-                + "<p class='hole'>Добавьте словарь или JSON RAM-таблицу — без них фразу не подобрать.</p>",
+                + "<p class='hole'>Нет словаря. Запустите <code>strela setup</code> или укажите файл словаря.</p>",
                 uid_text,
             )
         try:
@@ -138,12 +157,12 @@ def handle_elrs_form(
             uid = parse_uid_field(uid_text)
         except ValueError as exc:
             return False, f"<p class='hole'>{html.escape(str(exc))}</p>", uid_text
-        memory = resolve_upload_path(form, uploads, "memory_table_file", "memory_table")
-        wordlist = resolve_upload_path(form, uploads, "binding_wordlist_file", "binding_wordlist")
+        memory = _resolve_memory_table(form, uploads)
+        wordlist = _resolve_wordlist(form, uploads)
         if memory is None and wordlist is None:
             return (
                 False,
-                "<p class='hole'>Выберите файл словаря или JSON таблицы на компьютере (или укажите путь).</p>",
+                "<p class='hole'>Нет словаря. Запустите <code>strela setup</code> или загрузите файл словаря.</p>",
                 uid_text,
             )
         phrase, _source, problem = search_binding_sources(uid, wordlist, memory)
@@ -187,8 +206,10 @@ def handle_elrs_form(
             Inputs(
                 radio_json=radio_json,
                 radio_image=radio_image,
-                binding_wordlist=resolve_upload_path(form, uploads, "assemble_wordlist_file", "assemble_wordlist"),
-                binding_memory_table=resolve_upload_path(form, uploads, "assemble_memory_file", "assemble_memory"),
+                binding_wordlist=resolve_upload_path(form, uploads, "assemble_wordlist_file", "assemble_wordlist")
+                or _bundled_wordlist(),
+                binding_memory_table=resolve_upload_path(form, uploads, "assemble_memory_file", "assemble_memory")
+                or _bundled_memory_table(),
             )
         )
         saved = write_report(card, out)
