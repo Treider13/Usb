@@ -53,8 +53,38 @@ def test_diff_all_keeps_only_the_printed_settings():
 
 
 def test_empty_diff_is_a_confirmed_absence():
-    card = assemble(Inputs(banner="Betaflight 4.5.0", diff_text="# diff all\n"))
+    card = assemble(Inputs(banner="Betaflight 4.5.0", diff_text="# diff all\nbatch start\nbatch end\n"))
     assert card.fields["cli_diff"].value == "нет отличий"
+
+
+def test_diff_keeps_feature_resource_and_aux_not_only_set():
+    text = "\n".join(
+        [
+            "# diff all",
+            "batch start",
+            "feature RX_SERIAL",
+            "feature -RX_PPM",
+            "resource MOTOR 1 A08",
+            "aux 0 1 0 900 1300",
+            "batch end",
+        ]
+    )
+    card = assemble(Inputs(banner="Betaflight 4.5.0", diff_text=text))
+    value = card.fields["cli_diff"].value
+    assert value["feature"] == ["RX_SERIAL"]
+    assert value["feature_off"] == ["RX_PPM"]
+    assert value["lines"] == ["resource MOTOR 1 A08"]
+    assert value["aux"][0]["mode_id"] == 1
+    assert "нет отличий" not in str(value)
+
+
+def test_inav_dump_all_waypoints_are_read_without_a_separate_wp_file():
+    dump = "# INAV/MATEKF405 7.1.0\n" + WP
+    card = assemble(Inputs(dump_text=dump))
+    assert card.family == "inav"
+    assert card.fields["inav_waypoints"].source == "dump all"
+    assert card.fields["mission_file_source"].value == "dump all"
+    assert card.fields["mission_waypoints"].value[0]["action"] == "WAYPOINT"
 
 
 def test_blackbox_ends_are_the_csv_points(tmp_path: Path):

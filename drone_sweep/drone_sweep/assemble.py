@@ -317,16 +317,54 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
 
 
 def _cli_diff(card: Card, text: str) -> None:
+    """Keep every printed difference. `batch start` is the frame, not a change."""
     parsed = parse_dump(text)
+    body: dict = {}
     settings: dict[str, str] = {}
     for section in parsed.sections:
         prefix = "" if section["name"] == "master" else f"{section['name']}."
         for key, value in section["settings"].items():
             settings[f"{prefix}{key}"] = value
     if settings:
-        card.put("cli_diff", confirmed(settings, "diff all", "строки, которые diff all напечатал как отличие от заводских"))
-    else:
-        card.put("cli_diff", confirmed("нет отличий", "diff all", "diff all не напечатал ни одного set"))
+        body["set"] = settings
+    if parsed.features_enabled:
+        body["feature"] = parsed.features_enabled
+    if parsed.features_disabled:
+        body["feature_off"] = parsed.features_disabled
+    if parsed.serial_lines:
+        body["serial"] = parsed.serial_lines
+    if parsed.aux:
+        body["aux"] = [
+            {
+                "index": item.index,
+                "mode_id": item.mode_id,
+                "name": item.name,
+                "channel": item.channel,
+                "range_start": item.range_start,
+                "range_end": item.range_end,
+            }
+            for item in parsed.aux
+        ]
+    if parsed.vtxtable:
+        body["vtxtable"] = parsed.vtxtable
+    if parsed.vtx:
+        body["vtx"] = parsed.vtx
+    lines: list[str] = []
+    for name, rows in parsed.commands.items():
+        if name == "batch":
+            continue
+        lines.extend(rows)
+    if lines:
+        body["lines"] = lines
+    if not body:
+        card.put("cli_diff", confirmed("нет отличий", "diff all", "diff all не напечатал отличий от заводских"))
+        return
+    # A diff that is only `set` stays a flat table so two cards compare key by key.
+    shown: object = settings if list(body) == ["set"] else body
+    card.put(
+        "cli_diff",
+        confirmed(shown, "diff all", "всё, что diff all напечатал, кроме комментариев и batch start/end"),
+    )
 
 
 def _osd_layout(card: Card, osd: dict[str, str], family: str = "betaflight") -> None:
@@ -1047,18 +1085,25 @@ def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
     if cmd_points and not mission:
         mission = cmd_points
         mission_source = "bin CMD"
-    if inputs.wp_text is not None:
-        wp_points, wp_note = parse_inav_wp(inputs.wp_text)
+    wp_text = inputs.wp_text
+    wp_source = "inav wp"
+    if wp_text is None and card.family == "inav" and inputs.dump_text:
+        dumped, _dump_note = parse_inav_wp(inputs.dump_text)
+        if dumped:
+            wp_text = inputs.dump_text
+            wp_source = "dump all"
+    if wp_text is not None:
+        wp_points, wp_note = parse_inav_wp(wp_text)
         if wp_points:
-            card.put("inav_waypoints", confirmed(wp_points, "inav wp", wp_note))
+            card.put("inav_waypoints", confirmed(wp_points, wp_source, wp_note))
             if not mission:
                 mission = [
                     {"lat": point["lat"], "lon": point["lon"], "alt_cm": point["alt_cm"], "action": point["action_name"]}
                     for point in wp_points
                 ]
-                mission_source = "inav wp"
+                mission_source = wp_source
         else:
-            card.put("inav_waypoints", missing(wp_note, "inav wp"))
+            card.put("inav_waypoints", missing(wp_note, wp_source))
     journal.append({"source": "osd_ocr", "result": "not_used", "detail": "координаты с OSD треком не считаются"})
     journal.append({"source": "exif", "result": "not_used", "detail": "EXIF — точка съёмки, не маршрут"})
 

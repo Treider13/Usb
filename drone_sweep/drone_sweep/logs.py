@@ -104,11 +104,12 @@ def flight_timeline(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 }
             )
         elif kind == "MSG" and "failsafe" in str(row.get("Message") or "").lower():
+            text = str(row.get("Message")).replace("\x00", "").strip()
             events.append(
                 {
                     "time_us": when,
                     "kind": "MSG",
-                    "name": str(row.get("Message")).strip(),
+                    "name": text,
                 }
             )
     return events
