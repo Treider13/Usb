@@ -9,12 +9,13 @@ from typing import Mapping
 
 from .assemble import Inputs, assemble
 from .dump_elrs import public_extraction_summary
+from .elrs_drone_read import read_drone_elrs_html
 from .elrs_assemble import search_binding_sources
 from .elrs_binding import binding_phrase_to_uid, parse_uid_field, uid_bytes_to_hex
 from .elrs_rainbow import build_memory_table, save_memory_table
 from .menu import write_report
 from .report import render_html
-from .strela_bootstrap import default_binding_paths
+from .strela_bootstrap import default_binding_paths, resolve_source, search_binding_installed
 from .webapp_forms import Uploaded, resolve_upload_path
 
 
@@ -34,6 +35,26 @@ def _resolve_wordlist(form: dict[str, str], uploads: Mapping[str, Uploaded]) -> 
 def _resolve_memory_table(form: dict[str, str], uploads: Mapping[str, Uploaded]) -> Path | None:
     path = resolve_upload_path(form, uploads, "memory_table_file", "memory_table")
     return path if path is not None else _bundled_memory_table()
+
+
+def _dict_source(form: dict[str, str]) -> str:
+    return (form.get("dict_source") or "all").strip() or "all"
+
+
+def _search_phrase(
+    uid: list[int],
+    form: dict[str, str],
+    uploads: Mapping[str, Uploaded],
+) -> tuple[str | None, str, str]:
+    custom_wl = resolve_upload_path(form, uploads, "binding_wordlist_file", "binding_wordlist")
+    custom_tb = resolve_upload_path(form, uploads, "memory_table_file", "memory_table")
+    if custom_wl is not None or custom_tb is not None or form.get("binding_wordlist", "").strip():
+        return search_binding_sources(uid, _resolve_wordlist(form, uploads), _resolve_memory_table(form, uploads))
+    source = _dict_source(form)
+    if source == "all":
+        return search_binding_installed(uid, "all")
+    wl, tb = resolve_source(source)
+    return search_binding_sources(uid, wl, tb)
 
 
 def _path_field(form: dict[str, str], key: str) -> Path | None:
@@ -91,6 +112,8 @@ def handle_elrs_form(
     """Возвращает (успех, HTML-фрагмент, UID для подстановки в форму)."""
     uploads = files or {}
     action = form.get("action", "uid").strip()
+    if action == "read_drone":
+        return read_drone_elrs_html(form, source_id=_dict_source(form))
     if action == "uid":
         phrase = form.get("phrase", "").strip()
         if not phrase:
@@ -131,20 +154,11 @@ def handle_elrs_form(
             return bool(summary.get("extracted")), dump_block + uid_line, uid_text or ""
         if uid_text is None:
             return False, dump_block + "<p class='hole'>В образе не найден UID из шести байт.</p>", ""
-        wordlist = _resolve_wordlist(form, uploads)
-        memory = _resolve_memory_table(form, uploads)
-        if wordlist is None and memory is None:
-            return (
-                False,
-                dump_block
-                + "<p class='hole'>Нет словаря. Запустите <code>strela setup</code> или укажите файл словаря.</p>",
-                uid_text,
-            )
         try:
             uid = parse_uid_field(uid_text)
         except ValueError as exc:
             return False, dump_block + f"<p class='hole'>{html.escape(str(exc))}</p>", uid_text
-        phrase, _source, problem = search_binding_sources(uid, wordlist, memory)
+        phrase, _source, problem = _search_phrase(uid, form, uploads)
         if phrase is None:
             detail = problem or "Фраза для этого UID не найдена."
             return False, dump_block + f"<p class='hole'>{html.escape(detail)}</p>", uid_text
@@ -157,15 +171,7 @@ def handle_elrs_form(
             uid = parse_uid_field(uid_text)
         except ValueError as exc:
             return False, f"<p class='hole'>{html.escape(str(exc))}</p>", uid_text
-        memory = _resolve_memory_table(form, uploads)
-        wordlist = _resolve_wordlist(form, uploads)
-        if memory is None and wordlist is None:
-            return (
-                False,
-                "<p class='hole'>Нет словаря. Запустите <code>strela setup</code> или загрузите файл словаря.</p>",
-                uid_text,
-            )
-        phrase, _source, problem = search_binding_sources(uid, wordlist, memory)
+        phrase, _source, problem = _search_phrase(uid, form, uploads)
         if phrase is None:
             detail = problem or "Фраза для этого UID не найдена."
             return False, f"<p class='hole'>{html.escape(detail)}</p>", uid_text

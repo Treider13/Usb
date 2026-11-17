@@ -217,6 +217,27 @@ def _bundled_elrs_defaults() -> dict[str, str]:
     return {key: str(path) for key, path in default_binding_paths().items()}
 
 
+def _dict_source_select() -> str:
+    from .strela_bootstrap import list_catalog
+
+    options = "".join(
+        f'<option value="{html.escape(key)}">{html.escape(label)}</option>'
+        for key, label in list_catalog()
+    )
+    return f'<label>Словари <select name="dict_source">{options}</select></label>'
+
+
+def _drone_port_select() -> str:
+    choices = _ports(None)
+    if not choices:
+        return "<p class='help'>USB не виден — подключите полётник и обновите страницу.</p>"
+    options = '<option value="">— не читать USB —</option>' + "".join(
+        f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
+        for device, label in choices
+    )
+    return f'<label>USB полётник <select name="drone_port">{options}</select></label>'
+
+
 def crack_page(result: str = "", prefill_uid: str = "") -> bytes:
     result_block = f'<section class="report">{result}</section>' if result else ""
     uid_value = html.escape(prefill_uid)
@@ -237,9 +258,22 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 {bundled_note}
 {result_block}
 <article class="panel wide panel-accent">
+<h2>Считать с борта (USB + Wi‑Fi модуля)</h2>
+<p class="help">Дрон на USB и/или приёмник в Wi‑Fi ExpressLRS RX. Пароль Wi‑Fi — только для WebUI (<code>expresslrs</code>), не binding phrase.</p>
+<form method="post" action="/crack"{_MULTIPART}>
+<input type="hidden" name="action" value="read_drone">
+{_drone_port_select()}
+<label>Адрес модуля <input name="radio_base" value="http://10.0.0.1"></label>
+<label>Пароль Wi‑Fi WebUI <input name="wifi_password" type="password" placeholder="expresslrs" autocomplete="off"></label>
+{_dict_source_select()}
+<p><button type="submit">Считать и подобрать фразу</button></p>
+</form>
+</article>
+<article class="panel wide panel-accent">
 <h2>Фраза из образа за один шаг</h2>
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="phrase_from_flash">
+{_dict_source_select()}
 <label>Образ с ПК <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
 <span class="help">или путь <input name="flash_path"></span>
 <label>Словарь с ПК <input type="file" name="binding_wordlist_file" accept=".txt,.lst"></label>
@@ -271,6 +305,7 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 <h2>Подбор фразы по UID</h2>
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="crack">
+{_dict_source_select()}
 <label>UID (через запятую или hex) <input name="uid" value="{uid_value}" placeholder="79,4,253,130,33,85"></label>
 <label>Словарь с ПК <input type="file" name="binding_wordlist_file" accept=".txt,.lst"></label>
 <span class="help">или путь <input name="binding_wordlist" value="{bundled_wordlist}"></span>

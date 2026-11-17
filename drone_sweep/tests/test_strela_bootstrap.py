@@ -27,4 +27,4 @@ def test_run_setup_builds_manifest_and_table(tmp_path: Path, monkeypatch):
     assert paths["wordlist"].is_file()
     assert paths["memory_table"].is_file()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["presets_ready"] == ["passhelp"]
+    assert "passhelp" in manifest["presets_ready"]

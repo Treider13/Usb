@@ -18,11 +18,26 @@ WORDLIST_PRESETS: dict[str, tuple[str, str]] = {
         "passhelp/wordlist (~11k англ. слов, базовый набор для ELRS rainbow)",
         "https://raw.githubusercontent.com/passhelp/wordlist/master/words.txt",
     ),
+    "dwyl": (
+        "dwyl/english-words (англ. словарь, как в ELRS-Rainbow-Tables)",
+        "https://raw.githubusercontent.com/dwyl/english-words/master/words.txt",
+    ),
     "rockyou": (
-        "rockyou (~14M паролей; долго, но как в примере CIRCL elrs_do_rainbow)",
+        "rockyou (~14M паролей; как в примере CIRCL elrs_do_rainbow)",
         "https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt",
     ),
 }
+
+# Порядок установки при strela setup (обновляется при каждом setup --force).
+INSTALL_PRESET_ORDER: tuple[str, ...] = ("passhelp", "dwyl", "elrs_rainbow", "rockyou")
+
+# Как MUSTARDTIGERFPV/ELRS-Rainbow-Tables/get_wordstxt.sh (доп. списки в один файл).
+ELRS_RAINBOW_EXTRA_URLS: tuple[str, ...] = (
+    "https://archive.org/download/mobywordlists03201gut/SINGLE.TXT",
+    "https://archive.org/download/mobywordlists03201gut/ACRONYMS.TXT",
+    "https://archive.org/download/mobywordlists03201gut/COMPOUND.TXT",
+    "https://archive.org/download/mobywordlists03201gut/NAMES.TXT",
+)
 
 EXTRA_WORDLIST_URLS: tuple[tuple[str, str], ...] = (
     (
@@ -72,7 +87,36 @@ class FetchResult:
     bytes_written: int
 
 
+def fetch_bytes(url: str, *, timeout: float = 120.0) -> bytes:
+    try:
+        with urlopen(url, timeout=timeout) as response:
+            return response.read()
+    except URLError as exc:
+        raise OSError(f"не удалось скачать {url}: {exc}") from exc
+
+
+def fetch_elrs_rainbow_bundle(destination: Path, *, timeout: float = 180.0) -> FetchResult:
+    """Собирает elrs_rainbow.txt: passhelp + dwyl + moby (как get_wordstxt.sh)."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    chunks: list[bytes] = []
+    chunks.append(fetch_bytes(WORDLIST_PRESETS["passhelp"][1], timeout=timeout))
+    chunks.append(b"\n")
+    chunks.append(fetch_bytes(WORDLIST_PRESETS["dwyl"][1], timeout=timeout))
+    chunks.append(b"\n")
+    for url in ELRS_RAINBOW_EXTRA_URLS:
+        try:
+            chunks.append(fetch_bytes(url, timeout=timeout))
+            chunks.append(b"\n")
+        except OSError:
+            continue
+    data = b"".join(chunks)
+    destination.write_bytes(data)
+    return FetchResult(path=destination, preset="elrs_rainbow", bytes_written=len(data))
+
+
 def fetch_wordlist_preset(preset: str, destination: Path, *, timeout: float = 120.0) -> FetchResult:
+    if preset == "elrs_rainbow":
+        return fetch_elrs_rainbow_bundle(destination, timeout=timeout)
     if preset not in WORDLIST_PRESETS:
         known = ", ".join(sorted(WORDLIST_PRESETS))
         raise ValueError(f"неизвестный пресет {preset!r}; доступны: {known}")
@@ -115,8 +159,9 @@ def render_elrs_resources_html() -> str:
 <thead><tr><th>Пресет CLI</th><th>Описание</th><th>URL</th></tr></thead>
 <tbody>{preset_rows}</tbody>
 </table>
-<p class="help">При установке: <code>strela setup</code> (или <code>install.sh</code>) — скачивает
-<code>passhelp</code> и строит RAM-таблицу. Вручную:
+<p class="help">При установке: <code>strela setup</code> — качает
+passhelp, dwyl, elrs_rainbow, rockyou и строит RAM-таблицы; в подборе — «все словари».
+Вручную:
 <code>strela elrs fetch-wordlist passhelp --out words.txt</code>,
 <code>strela elrs build-memory words.txt --out elrs-table.json</code>.</p>
 <h3 class="section">Кто ещё реализовал</h3>

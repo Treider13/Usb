@@ -12,7 +12,11 @@ from .strela_bootstrap import run_setup, setup_is_ready
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="strela setup", description="Скачать словари ELRS и RAM-таблицу.")
     parser.add_argument("--data-dir", type=Path, help="каталог данных (или переменная STRELA_DATA)")
-    parser.add_argument("--force", action="store_true", help="перекачать словарь и пересобрать таблицу")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="обновить все словари (passhelp, dwyl, elrs_rainbow, rockyou) и RAM-таблицы",
+    )
     parser.add_argument("-q", "--quiet", action="store_true")
     args = parser.parse_args(argv)
     try:
