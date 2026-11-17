@@ -82,7 +82,7 @@ LABELS = {
     "features": "Функции прошивки",
     "parameters": "Параметры",
     "messages": "Сообщения лога",
-    "messages_with_rcin": "Сообщения рядом с RCIN",
+    "messages_with_rcin": "Строки журнала",
     "modes": "Режимы полёта",
     "rc_protocols": "Маска протоколов",
     "mnt1_type": "Тип подвеса",
@@ -94,9 +94,9 @@ LABELS = {
     "radio_page": "Все поля приёмника",
     "cli_sections": "Все секции CLI",
     "cli_commands": "Остальные команды CLI",
-    "log_schema": "Состав лога",
+    "log_schema": "Что есть в журнале",
     "log_events": "События EV",
-    "tlog_schema": "Состав tlog",
+    "tlog_schema": "Что есть в телеметрии",
     "mavlink_heartbeat": "HEARTBEAT",
     "mavlink_radio_status": "RADIO_STATUS",
     "mavlink_rc_interval_ms": "Шаг записей RC_CHANNELS, мс",
@@ -157,6 +157,89 @@ def _show(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
 
 
+# Names a person can use. Everything else in a DataFlash log is bookkeeping.
+_LOG_PLAIN = (
+    ("GPS", "Спутники, координаты"),
+    ("GPS2", "Второй приёмник спутников"),
+    ("ORGN", "Дом"),
+    ("POS", "Оценка положения, не спутник"),
+    ("RCIN", "Стики пульта"),
+    ("RCI2", "Дальние каналы пульта"),
+    ("RCOU", "Команды на моторы"),
+    ("RCO2", "Дальние выходы моторов"),
+    ("BARO", "Высота по барометру"),
+    ("CTUN", "Высота, которую держал борт"),
+    ("ATT", "Крен, тангаж и курс"),
+    ("BAT", "Батарея"),
+    ("ESC", "Обороты моторов"),
+    ("RSSI", "Уровень сигнала приёмника"),
+    ("IMU", "Гироскоп и акселерометр"),
+    ("VIBE", "Вибрация"),
+    ("MODE", "Режим полёта"),
+    ("EV", "Взведение и события"),
+    ("PARM", "Параметры"),
+    ("MSG", "Текстовые строки"),
+    ("CMD", "Точки задания"),
+    ("ERR", "Ошибки"),
+    ("POWR", "Питание платы"),
+    ("VER", "Версия прошивки в журнале"),
+)
+_LOG_WORD = dict(_LOG_PLAIN)
+
+
+def _log_summary(value: dict) -> str:
+    lines = []
+    service = 0
+    seen = set()
+    for name, word in _LOG_PLAIN:
+        entry = value.get(name)
+        if not isinstance(entry, dict):
+            continue
+        count = entry.get("count")
+        if not count:
+            continue
+        seen.add(name)
+        lines.append(f"<li><strong>{html.escape(word)}</strong> — {html.escape(str(count))} кадров</li>")
+    for name, entry in value.items():
+        if name in seen or name in _LOG_WORD:
+            continue
+        if isinstance(entry, dict):
+            service += int(entry.get("count") or 0)
+    if service:
+        lines.append(f"<li>Служебные кадры журнала — {service}. Их поля в карточку не выписываются.</li>")
+    if not lines:
+        return "<p>—</p>"
+    return "<ul>" + "".join(lines) + "</ul>"
+
+
+def _message_lines(value: list) -> str:
+    items = []
+    snapshots = []
+    for row in value:
+        text = str(row.get("text") or "").strip()
+        if text:
+            items.append(f"<li>{html.escape(text)}</li>")
+        sticks = row.get("rcin")
+        if isinstance(sticks, dict) and sticks:
+            snapshots.append(sticks)
+    note = ""
+    if snapshots and all(item == snapshots[0] for item in snapshots):
+        moved = []
+        for key, raw in snapshots[0].items():
+            try:
+                number = int(float(raw))
+            except (TypeError, ValueError):
+                continue
+            if number < 1400 or number > 1600:
+                channel = key[1:] if key.startswith("C") and key[1:].isdigit() else key
+                moved.append(f"канал {channel}: {number}")
+        if moved:
+            note = "<p>Стики в эти строки не менялись. Середина стика — около 1500. " + html.escape(", ".join(moved)) + ".</p>"
+    elif snapshots:
+        note = "<p>Стики в этих строках менялись. Повтор всех каналов на экран не выводится.</p>"
+    return "<ul>" + "".join(items) + "</ul>" + note
+
+
 def _value_html(value) -> str:
     if isinstance(value, list) and value and all(isinstance(item, str) for item in value):
         return "<ul>" + "".join(f"<li>{html.escape(item)}</li>" for item in value) + "</ul>"
@@ -171,22 +254,9 @@ def _value_html(value) -> str:
                 blocks.append("<pre>" + html.escape("\n".join(str(line) for line in lines)) + "</pre>")
         return "".join(blocks)
     if isinstance(value, dict) and value and all(isinstance(item, dict) and "count" in item for item in value.values()):
-        rows = []
-        for name, entry in value.items():
-            fields = ", ".join(str(item) for item in entry.get("fields") or [])
-            detail = entry.get("note") or ""
-            rows_value = entry.get("rows")
-            if isinstance(rows_value, list) and rows_value and not detail:
-                detail = f"кадров {len(rows_value)}"
-            rows.append(
-                "<tr>"
-                f"<th>{html.escape(str(name))}</th>"
-                f"<td>{html.escape(str(entry.get('count', '')))}</td>"
-                f"<td>{html.escape(fields)}</td>"
-                f"<td>{html.escape(detail)}</td>"
-                "</tr>"
-            )
-        return "<table><tr><th>Тип</th><th>Кадров</th><th>Поля</th><th>Строки</th></tr>" + "".join(rows) + "</table>"
+        return _log_summary(value)
+    if isinstance(value, list) and value and all(isinstance(item, dict) and "text" in item for item in value):
+        return _message_lines(value)
     if isinstance(value, dict) and value and all(isinstance(item, list) for item in value.values()):
         rows = []
         for name, lines in value.items():
@@ -197,6 +267,13 @@ def _value_html(value) -> str:
                 "</tr>"
             )
         return "<table>" + "".join(rows) + "</table>"
+    if isinstance(value, dict) and isinstance(value.get("bits"), list):
+        names = [str(item) for item in value["bits"]]
+        if names == ["All"]:
+            text = "включены все протоколы пульта. Это маска, не имя одного протокола."
+        else:
+            text = ", ".join(names) or "в маске нет названных протоколов"
+        return f"<p>{html.escape(text)}</p>"
     if isinstance(value, dict) and value and all(not isinstance(item, (dict, list)) for item in value.values()):
         return _flat_table(value)
     table = _record_table(value)
@@ -215,12 +292,30 @@ def _flat_table(value: dict) -> str:
     return f"<table>{rows}</table>"
 
 
+def _column_name(key: str) -> str:
+    return {"TimeUS": "Метка, мкс", "time_us": "Метка, мкс", "Id": "Событие"}.get(key, key)
+
+
+def _event_cell(key: str, value) -> str:
+    if key == "Id":
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return str(value)
+        return {10: "взведение", 11: "снятие с взведения"}.get(number, str(number))
+    if isinstance(value, (int, float)):
+        return _plain_number(value)
+    return "" if value is None else str(value)
+
+
 def _record_table(value) -> str:
     if not isinstance(value, list) or not value or not all(isinstance(item, dict) for item in value):
         return ""
     keys: list[str] = []
     for item in value:
         for key, cell in item.items():
+            if key == "mavpackettype":
+                continue
             if isinstance(cell, (dict, list)):
                 return ""
             if key not in keys:
@@ -230,11 +325,11 @@ def _record_table(value) -> str:
     if len(value) > 8:
         shown = [value[0], value[-1]]
         note = f"<p>строк {len(value)}, первая и последняя</p>"
-    head = "".join(f"<th>{html.escape(str(key))}</th>" for key in keys)
+    head = "".join(f"<th>{html.escape(_column_name(key))}</th>" for key in keys)
     body = []
     for item in shown:
         cells = "".join(
-            f"<td>{html.escape(_plain_number(item.get(key)) if isinstance(item.get(key), (int, float)) else str(item.get(key, '')))}</td>"
+            f"<td>{html.escape(_event_cell(key, item.get(key)))}</td>"
             for key in keys
         )
         body.append(f"<tr>{cells}</tr>")
@@ -257,11 +352,39 @@ def _cell(name: str, item) -> str:
     )
 
 
+def _flight_block(flight: dict) -> str:
+    """A flight with no track and no home is not shown. The gaps list already says so."""
+    takeoff = flight.get("takeoff") or None
+    landing = flight.get("landing") or None
+    home = flight.get("home") or None
+    track = flight.get("track") or []
+    if not track and not takeoff and not landing and not home:
+        return ""
+    bits = []
+    if takeoff:
+        bits.append(f"Точка взлёта: {takeoff.get('lat')}, {takeoff.get('lon')}")
+    if landing:
+        bits.append(f"Посадка: {landing.get('lat')}, {landing.get('lon')}")
+    if home:
+        bits.append(f"Дом: {home.get('lat')}, {home.get('lon')}")
+    if track:
+        bits.append(f"Точек маршрута: {len(track)}")
+    if flight.get("route_length_m") is not None:
+        bits.append(f"Длина маршрута, м: {round(float(flight['route_length_m']))}")
+    if flight.get("max_distance_from_home_m") is not None:
+        bits.append(f"Дальше всего от дома, м: {round(float(flight['max_distance_from_home_m']))}")
+    index = int(flight.get("index") or 0) + 1
+    body = "".join(f"<li>{html.escape(line)}</li>" for line in bits)
+    return f'<article class="cell wide"><h3>Вылет {index}</h3><ul>{body}</ul></article>'
+
+
 def render_html(card: Card, saved_path: str | None = None) -> str:
     buckets: dict[str, list[str]] = {title: [] for title, _names in GROUPS}
     buckets["Полётник"] = []
     for name, item in card.fields.items():
         if item.status in ("missing", "not_applicable"):
+            continue
+        if name == "messages" and card.fields.get("messages_with_rcin") and card.fields["messages_with_rcin"].status == "confirmed":
             continue
         buckets[_group_of(name)].append(_cell(name, item))
     sections = []
@@ -293,13 +416,8 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
         f"<li>{html.escape(line['source'])}: {html.escape(line['result'])}. {html.escape(line['detail'])}</li>"
         for line in card.journal
     ) or "<li>Файлов маршрута не передавали.</li>"
-    flights = ""
-    if card.flights:
-        flights = "<h2>Вылеты</h2><div class=\"grid\">" + "".join(
-            f'<article class="cell wide"><h3>Вылет {html.escape(str(flight.get("index", "")))}</h3>'
-            f'<p class="value">{html.escape(_show(flight))}</p></article>'
-            for flight in card.flights
-        ) + "</div>"
+    flight_cards = [block for block in (_flight_block(flight) for flight in card.flights) if block]
+    flights = "<h2>Вылеты</h2><div class=\"grid\">" + "".join(flight_cards) + "</div>" if flight_cards else ""
     saved = f"<p>Файл отчёта: {html.escape(saved_path)}</p>" if saved_path else ""
     inner = f"""
 <h1>Стрела</h1>

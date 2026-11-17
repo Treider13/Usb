@@ -11,7 +11,7 @@ from .banner import frame_from_params, mav_type_word, parse_banner_lines
 from .blackbox import parse_gps_csv, parse_header_file
 from .dump import master_or_unique, parse_boxnames, parse_dump
 from .vtx import inav_grid, inav_saved_frequency, parse_video_grid, parse_vtx_rules, selected_channel
-from .enums_ardupilot import CAMERA_TYPE_45, MOUNT_TYPE_45, rc_protocols_45
+from .enums_ardupilot import rc_protocols_45
 from .hashing import sha256_bytes, sha256_file
 from .hints import WORKFLOW, hint_for_hole
 from .logs import load_bin, load_tlog
@@ -281,8 +281,17 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
                 )
         card.put("parameters", confirmed(params, "bin PARM") if params else missing("в .BIN нет PARM", "bin"))
         card.put("messages", confirmed(messages, "bin MSG") if messages else missing("в .BIN нет MSG", "bin"))
+        for item in messages:
+            text = str(item.get("text") or "")
+            if text.lower().startswith("rc protocol:"):
+                heard = text.split(":", 1)[1].strip()
+                if heard and "uart_protocol" not in card.fields:
+                    card.put(
+                        "uart_protocol",
+                        confirmed(heard, "bin MSG", "плата написала, какой протокол пульта она приняла"),
+                    )
         card.put("modes", confirmed(modes, "bin MODE") if modes else missing("в .BIN нет MODE", "bin"))
-        card.put("log_schema", confirmed(log_inventory(rows), "bin DFReader", "каждый тип сообщения и каждый кадр"))
+        card.put("log_schema", confirmed(log_inventory(rows), "bin DFReader", "какие записи есть в журнале. Служебные кадры свёрнуты, полные строки остаются в card.json"))
         events = [dict(row) for row in rows if row.get("name") == "EV"]
         for event in events:
             event.pop("name", None)
@@ -549,6 +558,28 @@ def _learn_banner(card: Card, lines: list[str], source: str) -> None:
         card.put("board_messages", confirmed(found["rest"], source, "остальные строки платы"))
 
 
+# CAM1_TYPE and MNT1_TYPE from Copter 4.5. Zero is "none": the device is not fitted.
+_CAMERA_PLAIN = {
+    1: "камера на сервах",
+    2: "камера через реле",
+    3: "камера на сервах и реле",
+    4: "камера через подвес",
+    5: "камера по MAVLink",
+    6: "камера MAVLink версии 2",
+    7: "камера из скрипта",
+}
+_MOUNT_PLAIN = {
+    1: "подвес на сервах",
+    2: "подвес Solo",
+    3: "подвес Alexmos",
+    4: "подвес SToRM32 по MAVLink",
+    5: "подвес SToRM32 по UART",
+    6: "подвес Gremsy",
+    7: "подвес, бесколлекторный ШИМ",
+    8: "подвес Siyi",
+}
+
+
 def _known_params(card: Card, params: dict, source: str = "bin PARM") -> None:
     if "RC_PROTOCOLS" in params:
         value = int(params["RC_PROTOCOLS"])
@@ -561,20 +592,15 @@ def _known_params(card: Card, params: dict, source: str = "bin PARM") -> None:
             ),
         )
     if "MNT1_TYPE" in params:
-        value = int(params["MNT1_TYPE"])
-        card.put(
-            "mnt1_type",
-            confirmed(
-                {"value": value, "label": MOUNT_TYPE_45.get(value, "unknown enum")},
-                source,
-            ),
-        )
+        value = int(float(params["MNT1_TYPE"]))
+        label = _MOUNT_PLAIN.get(value)
+        if label:
+            card.put("mnt1_type", confirmed(label, source, "MNT1_TYPE. Ноль означает, что подвеса нет, и в карточку не пишется."))
     if "CAM1_TYPE" in params:
-        value = int(params["CAM1_TYPE"])
-        card.put(
-            "cam1_type",
-            confirmed({"value": value, "label": CAMERA_TYPE_45.get(value, "unknown enum")}, source),
-        )
+        value = int(float(params["CAM1_TYPE"]))
+        label = _CAMERA_PLAIN.get(value)
+        if label:
+            card.put("cam1_type", confirmed(label, source, "CAM1_TYPE. Ноль означает, что камеры нет, и в карточку не пишется."))
     if "VTX_ENABLE" in params:
         card.put("vtx_enable", confirmed(params["VTX_ENABLE"], source))
         card.put(
@@ -664,7 +690,7 @@ def _messages_with_rcin(card: Card, rows: list[dict], messages: list[dict]) -> N
             }
         joined.append({"time_us": stamp, "text": message.get("text"), "rcin": channels})
     if joined:
-        card.put("messages_with_rcin", confirmed(joined, "bin MSG+RCIN", "совпадение по TimeUS, не расшифровка скрипта"))
+        card.put("messages_with_rcin", confirmed(joined, "bin MSG+RCIN", "текст строк журнала. Кадры стиков в эти же мгновения лежат рядом и на экран целиком не выводятся."))
 
 
 def _radio_fields(card: Card, inputs: Inputs) -> None:
