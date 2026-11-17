@@ -135,7 +135,7 @@ def run_menu(input_lines: list[str], output: list[str] | None = None, port_opene
         elif choice == "3":
             ports = list_usb_ports()
             say("Порты: " + (", ".join(ports) if ports else "не найдены. Подключите полётник кабелем USB и откройте меню снова."))
-            say("Кнопка чтения сама отличает Betaflight, INAV, Cleanflight и MAVLink. В порт уходят только чтение: MSP, dump all или список параметров. set, save и serialpassthrough не отправляются.")
+            say("Кнопка чтения сама отличает Betaflight, INAV, Cleanflight и MAVLink. Сначала MSP или список параметров, для полётника с CLI затем dump all. У Betaflight после дампа уходит exit noreboot: голый exit в cli.c перезагружает плату. У INAV exit вызывает cliReboot, поэтому не отправляется. set, save и serialpassthrough не отправляются.")
             picked = ask("Путь порта. Enter — не читать.").strip()
             if not picked:
                 continue

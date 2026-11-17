@@ -47,6 +47,7 @@ class Inputs:
     banner: str = ""
     auth_declined: bool = False
     mavlink_rows: list[dict] | None = None
+    read_note: str = ""
 
 
 def assemble(inputs: Inputs) -> Card:
@@ -80,6 +81,8 @@ def assemble(inputs: Inputs) -> Card:
     _route(card, inputs, rows)
     _applicability(card)
     _holes(card)
+    if inputs.read_note:
+        card.holes.append(inputs.read_note)
     return card
 
 

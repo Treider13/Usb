@@ -11,7 +11,10 @@ from drone_sweep.ports import decode_osd_position, map_baudrate
 from drone_sweep.usb_read import (
     MSP_FC_VARIANT,
     QuietPort,
+    ReadOnlyError,
     ScriptedPort,
+    assert_readonly_cli,
+    cli_leave,
     collect_flight_controller,
     mavlink_heartbeat,
     msp_request,
@@ -115,7 +118,10 @@ def test_usb_read_sends_dump_all_and_builds_the_card(tmp_path: Path):
     assert b"status\n" in written
     assert b"save" not in written.lower()
     assert b"serialpassthrough" not in written.lower()
+    assert b"exit noreboot\n" in written
+    assert b"exit\n" not in written
     assert msp_request(116) in port.written
+    assert port.written.index(msp_request(116)) < port.written.index(b"#")
 
     out = tmp_path / "usb-out"
     menu = run_menu(["3", "/dev/ttyTEST", str(out), "5"], port_opener=lambda path: _scripted_fc())
@@ -143,11 +149,11 @@ def _scripted_fc() -> ScriptedPort:
     reply = bytes([ord("$"), ord("M"), ord(">"), size, 116]) + payload + bytes([checksum])
     return ScriptedPort(
         chunks=[
+            reply,
             b"#\r\n",
             b"# Betaflight / STM32F405 4.5.0\r\n#\r\n",
             b"System Uptime: 10 seconds\r\n#\r\n",
             DUMP.encode("ascii"),
-            reply,
         ]
     )
 
@@ -201,7 +207,8 @@ def test_param_request_list_does_not_write_a_parameter():
             return self.left.pop(0) if self.left else None
 
     link = Link()
-    rows = read_mavlink_parameters(link)
+    rows, note = read_mavlink_parameters(link)
+    assert note == ""
     assert link.sent == [(1, 1)]
     card = assemble(
         Inputs(
@@ -223,11 +230,52 @@ class _Param:
         self.param_count = param_count
 
 
+def test_bare_exit_is_refused_because_it_reboots():
+    import pytest
+
+    with pytest.raises(ReadOnlyError):
+        assert_readonly_cli("exit")
+    assert assert_readonly_cli("exit noreboot") == "exit noreboot"
+    leave, note = cli_leave("betaflight")
+    assert leave == "exit noreboot"
+    assert note == ""
+    leave, note = cli_leave("inav")
+    assert leave is None
+    assert "cliReboot" in note
+
+
+def test_a_short_parameter_list_is_marked_incomplete():
+    class Link:
+        def __init__(self):
+            self.target_system = 1
+            self.target_component = 1
+            self.mav = self
+            self.left = [_Param("SERIAL1_PROTOCOL", 29.0, 0, 2)]
+
+        def param_request_list_send(self, system, component):
+            return None
+
+        def recv_match(self, type=None, blocking=False, timeout=None):
+            return self.left.pop(0) if self.left else None
+
+    rows, note = read_mavlink_parameters(Link())
+    card = assemble(Inputs(mavlink_rows=[{"name": "HEARTBEAT", "autopilot": 3}, *rows], read_note=note))
+    assert "тишина 3 секунды" in card.holes[-1]
+    assert len(card.fields["parameters"].value) == 1
+
+
+def test_msp_variant_is_found_after_leading_bytes():
+    frame = b"garbage" + _variant_frame(b"BTFL") + b"tail"
+    assert msp_variant_name(frame) == "betaflight"
+
+
 def test_home_page_reads_the_selected_usb_port():
     page = home_page([("/dev/ttyACM0", "/dev/ttyACM0 — полётник")]).decode("utf-8")
+    assert 'class="topbar"' in page
     assert 'action="/usb"' in page
     assert "Считать" in page
     assert 'name="port"' in page
+    assert 'class="baud">115200' in page
     assert "/dev/ttyACM0" in page
     assert "Файл отчёта" not in page
     empty = home_page([]).decode("utf-8")

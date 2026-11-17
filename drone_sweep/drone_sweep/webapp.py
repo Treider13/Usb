@@ -47,27 +47,22 @@ def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
             for device, label in choices
         )
         usb = f"""
-<form method="post" action="/usb">
-<label>
-<span class="title">USB-порт</span>
-<span class="help">Тот же список, что на главной странице конфигуратора: выберите порт, к которому подключён полётник. Скорость 115200.</span>
-<select name="port">{options}</select>
-</label>
-<label>
-<span class="title">Папка отчёта</span>
-<span class="help">Куда положить карточку после чтения.</span>
-<input name="out" value="strela-out">
-</label>
-<p><button type="submit">Считать</button></p>
+<form class="connect" method="post" action="/usb">
+<select name="port" aria-label="USB-порт">{options}</select>
+<span class="baud">115200</span>
+<input name="out" value="strela-out" aria-label="Папка отчёта" placeholder="папка отчёта">
+<button type="submit">Считать</button>
 </form>
 """
     else:
-        usb = "<p>Порт не виден. Подключите полётник кабелем USB и обновите страницу.</p>"
+        usb = '<p class="connect">Порт не виден. Подключите полётник кабелем USB и обновите страницу.</p>'
     inner = f"""
-<h1>{APP_NAME}</h1>
-<p class="lede">Подключите дрон по USB, выберите порт и нажмите «Считать». Программа сама отличит Betaflight, INAV, Cleanflight и MAVLink и снимет только чтение.</p>
-<h2>Подключение по USB</h2>
+<header class="topbar">
+<div class="brand">{APP_NAME}</div>
 {usb}
+</header>
+<h2>Подключение по USB</h2>
+<p class="lede">Выберите порт в верхней полосе и нажмите «Считать». Скорость 115200, как в списке конфигуратора. Программа сама отличит Betaflight, INAV, Cleanflight и MAVLink и снимет только чтение.</p>
 <div class="actions">
 <a class="action quiet" href="/assemble">Собрать карточку из файлов</a>
 <a class="action quiet" href="/explain">Подсказки</a>

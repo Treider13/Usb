@@ -39,6 +39,8 @@ def assert_readonly_cli(command: str) -> str:
         raise ReadOnlyError("разрешён только diff all")
     if head == "get" and len(text.split()) != 2:
         raise ReadOnlyError("get читает одно имя")
+    if head == "exit" and text.lower() != "exit noreboot":
+        raise ReadOnlyError("exit без noreboot перезагружает плату")
     return text
 
 
@@ -69,28 +71,54 @@ class ScriptedPort:
         return chunk[:size]
 
 
-def read_cli(port: ScriptedPort, commands: list[str]) -> str:
+def read_cli(port: ScriptedPort, commands: list[str], leave: str | None = "exit noreboot") -> str:
     port.write(b"#")
     parts = [port.read().decode("latin1", errors="replace")]
     for command in commands:
         safe = assert_readonly_cli(command)
         port.write(safe.encode("ascii") + b"\n")
         parts.append(port.read().decode("latin1", errors="replace"))
-    port.write(b"exit\n")
+    if leave is not None:
+        # Betaflight cli.c: bare `exit` reboots. `exit noreboot` returns to MSP.
+        safe = assert_readonly_cli(leave)
+        port.write(safe.encode("ascii") + b"\n")
     return "".join(parts)
 
 
 def read_boxnames(port: ScriptedPort) -> str:
     port.write(msp_request(MSP_BOXNAMES))
     frame = port.read()
-    return _msp_payload(frame, MSP_BOXNAMES).decode("latin1", errors="replace")
+    try:
+        payload = _msp_payload(frame, MSP_BOXNAMES)
+    except ValueError:
+        return ""
+    return payload.decode("latin1", errors="replace")
 
 
-def collect_flight_controller(port) -> tuple[str, str]:
-    """Read version, status and dump all, then MSP_BOXNAMES. Nothing is saved."""
-    dump_text = read_cli(port, ["version", "status", "dump all"])
+def collect_flight_controller(port, leave_cli: str | None = "exit noreboot") -> tuple[str, str]:
+    """MSP_BOXNAMES while the board is still in MSP, then the CLI dump.
+
+    Names are requested first: after `#` the port is a text console and an
+    MSP frame is no longer a request. Nothing is saved.
+    """
     boxes = read_boxnames(port)
+    dump_text = read_cli(port, ["version", "status", "dump all"], leave=leave_cli)
     return dump_text, boxes
+
+
+def cli_leave(kind: str) -> tuple[str | None, str]:
+    """How to leave the CLI without a reboot, for the firmware we identified."""
+    if kind == "betaflight":
+        return "exit noreboot", ""
+    if kind == "inav":
+        return (
+            None,
+            "INAV оставлен в CLI. В src/main/fc/cli.c команда exit вызывает cliReboot(), поэтому она не отправлена.",
+        )
+    return (
+        None,
+        "Плата оставлена в CLI. exit noreboot есть в Betaflight cli.c и не перезагружает плату. Для этой прошивки команда не отправлялась.",
+    )
 
 
 class QuietPort:
@@ -129,11 +157,33 @@ class QuietPort:
                 break
         return bytes(buf)
 
+    def listen(self, seconds: float) -> bytes:
+        """Keep the port open for `seconds` even when it is quiet.
+
+        ArduPilot sends HEARTBEAT once a second. The short idle used for a
+        CLI line would return before that frame arrives.
+        """
+        saved = (self.idle_s, self.overall_s)
+        self.idle_s = seconds
+        self.overall_s = seconds
+        try:
+            return self.read()
+        finally:
+            self.idle_s, self.overall_s = saved
+
 
 def open_betaflight_port(path: str, overall_s: float = 90.0) -> QuietPort:
     import serial
 
-    raw = serial.Serial(path, 115200, timeout=0.05)
+    raw = serial.Serial()
+    raw.port = path
+    raw.baudrate = 115200
+    raw.timeout = 0.05
+    raw.dtr = False
+    raw.rts = False
+    raw.open()
+    raw.dtr = False
+    raw.rts = False
     return QuietPort(raw, overall_s=overall_s)
 
 
@@ -162,18 +212,58 @@ def mavlink_heartbeat(buf: bytes) -> dict | None:
                 "autopilot": message.autopilot,
                 "type": message.type,
                 "mavlink_version": getattr(message, "mavlink_version", None),
+                "src_system": message.get_srcSystem(),
+                "src_component": message.get_srcComponent(),
             }
     return None
 
 
-def read_mavlink_parameters(connection) -> list[dict]:
+class SerialMavlink:
+    """PARAM_REQUEST_LIST on a port that is already open. The port is not reopened."""
+
+    def __init__(self, raw, beat: dict | None):
+        from pymavlink.dialects.v20 import ardupilotmega as dialect
+
+        self.raw = raw
+        self.mav = dialect.MAVLink(self, srcSystem=255, srcComponent=190)
+        self.target_system = int((beat or {}).get("src_system") or 1)
+        self.target_component = int((beat or {}).get("src_component") or 1)
+
+    def write(self, data: bytes) -> None:
+        self.raw.write(data)
+        flush = getattr(self.raw, "flush", None)
+        if flush is not None:
+            flush()
+
+    def recv_match(self, type=None, blocking=False, timeout=None):
+        import time
+
+        deadline = time.monotonic() + (timeout or 0)
+        while time.monotonic() < deadline:
+            chunk = self.raw.read(4096)
+            if not chunk:
+                continue
+            for index in range(len(chunk)):
+                message = self.mav.parse_char(chunk[index:index + 1])
+                if message is not None and message.get_type() == type:
+                    return message
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+def read_mavlink_parameters(connection) -> tuple[list[dict], str]:
     """PARAM_REQUEST_LIST only. No parameter is written back."""
     connection.mav.param_request_list_send(connection.target_system, connection.target_component)
     rows: list[dict] = []
+    expected: int | None = None
     while True:
         message = connection.recv_match(type="PARAM_VALUE", blocking=True, timeout=3)
         if message is None:
-            break
+            if not rows or (expected is not None and len(rows) < expected):
+                return rows, "список PARAM_VALUE оборвался: тишина 3 секунды"
+            return rows, ""
         rows.append(
             {
                 "name": "PARAM_VALUE",
@@ -181,9 +271,9 @@ def read_mavlink_parameters(connection) -> list[dict]:
                 "param_value": message.param_value,
             }
         )
+        expected = message.param_count
         if message.param_index + 1 >= message.param_count:
-            break
-    return rows
+            return rows, ""
 
 
 def read_usb(path: str, port_opener=None, mavlink_opener=None) -> "Inputs":
@@ -199,49 +289,51 @@ def read_usb(path: str, port_opener=None, mavlink_opener=None) -> "Inputs":
         port = port_opener(path)
         dump_text, boxes = collect_flight_controller(port)
         return Inputs(dump_text=dump_text, boxnames=boxes)
-    kind, beat = _probe(path)
-    if kind == "mavlink":
-        if mavlink_opener is None:
-            from pymavlink import mavutil
-
-            link = mavutil.mavlink_connection(path, baud=115200)
-            link.wait_heartbeat(timeout=5)
-        else:
-            link = mavlink_opener(path)
-        try:
-            rows = read_mavlink_parameters(link)
-        finally:
-            close = getattr(link, "close", None)
-            if close is not None:
-                close()
-        if beat:
-            rows.insert(0, {"name": "HEARTBEAT", **beat})
-        return Inputs(mavlink_rows=rows)
-    if kind in {"betaflight", "inav", "cleanflight"}:
-        port = open_betaflight_port(path)
-        try:
-            dump_text, boxes = collect_flight_controller(port)
-        finally:
-            port.raw.close()
-        return Inputs(dump_text=dump_text, boxnames=boxes)
+    port = open_betaflight_port(path)
+    try:
+        kind, beat = _classify(port)
+        if kind == "mavlink":
+            link = SerialMavlink(port.raw, beat) if mavlink_opener is None else mavlink_opener(path)
+            try:
+                rows, note = read_mavlink_parameters(link)
+            finally:
+                close = getattr(link, "close", None)
+                if close is not None:
+                    close()
+            if beat:
+                rows.insert(0, {"name": "HEARTBEAT", **beat})
+            return Inputs(mavlink_rows=rows, read_note=note)
+        if kind in {"betaflight", "inav", "cleanflight"}:
+            leave, note = cli_leave(kind)
+            dump_text, boxes = collect_flight_controller(port, leave_cli=leave)
+            return Inputs(dump_text=dump_text, boxnames=boxes, read_note=note)
+    finally:
+        port.raw.close()
     raise ValueError("порт не назвал Betaflight, INAV, Cleanflight и не прислал HEARTBEAT")
 
 
-def _probe(path: str) -> tuple[str, dict | None]:
-    port = open_betaflight_port(path, overall_s=1.5)
-    try:
-        heard = port.read()
-        beat = mavlink_heartbeat(heard)
+def _classify(port: QuietPort) -> tuple[str, dict | None]:
+    import time
+
+    heard = port.listen(2.5)
+    beat = mavlink_heartbeat(heard)
+    if beat is not None:
+        return "mavlink", beat
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        port.write(msp_request(MSP_API_VERSION))
+        api = port.read()
+        beat = mavlink_heartbeat(api)
         if beat is not None:
             return "mavlink", beat
-        port.write(msp_request(MSP_API_VERSION))
-        port.read()
         port.write(msp_request(MSP_FC_VARIANT))
-        variant = msp_variant_name(port.read())
+        reply = port.read()
+        beat = mavlink_heartbeat(reply)
+        if beat is not None:
+            return "mavlink", beat
+        variant = msp_variant_name(reply)
         if variant is not None:
             return variant, None
-    finally:
-        port.raw.close()
     return "unknown", None
 
 
@@ -261,9 +353,20 @@ def describe_ports() -> list[tuple[str, str]]:
 
 
 def _msp_payload(frame: bytes, code: int) -> bytes:
-    if len(frame) < 6 or frame[0:3] != b"$M>":
-        raise ValueError("порт не вернул MSP-ответ")
-    size = frame[3]
-    if frame[4] != code:
-        raise ValueError(f"ожидался MSP {code}, пришёл {frame[4]}")
-    return frame[5:5 + size]
+    start = 0
+    while True:
+        index = frame.find(b"$M>", start)
+        if index < 0 or index + 6 > len(frame):
+            raise ValueError("порт не вернул MSP-ответ")
+        size = frame[index + 3]
+        if frame[index + 4] != code or index + 6 + size > len(frame):
+            start = index + 1
+            continue
+        payload = frame[index + 5:index + 5 + size]
+        checksum = size ^ code
+        for byte in payload:
+            checksum ^= byte
+        if frame[index + 5 + size] != checksum:
+            start = index + 1
+            continue
+        return payload
