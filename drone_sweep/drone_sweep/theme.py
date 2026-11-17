@@ -1,7 +1,7 @@
 """Chrome copied from the Betaflight configurator layout.
 
-Dark surfaces, a left rail, a connect bar, and the gold primary
-`--color-primary-500: #ffbb00`. The name on the rail is Стрела.
+Dark surfaces, a left rail, a connect bar, and a red tactical primary
+`--primary-500: #e63946` (PC, как app.betaflight.com). The name on the rail is Стрела.
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ CSS = """
   --text: #f2f2f2;
   --muted: #a3a3a3;
   --line: #2c2d31;
-  --primary-500: #ffbb00;
-  --primary-700: #8a6500;
-  --action: #ffbb00;
+  --primary-500: #e63946;
+  --primary-700: #9f1d28;
+  --action: #e63946;
   --success: #96e212;
   --info: #64a5f6;
   --quiet: #b5b5b5;
@@ -91,7 +91,7 @@ label.folder { display: flex; align-items: center; gap: 8px; margin: 0; color: v
 button, a.action {
   display: inline-block;
   background: var(--action);
-  color: #1a1200;
+  color: #ffffff;
   text-decoration: none;
   padding: 8px 16px;
   border: 0;
@@ -204,8 +204,26 @@ label .title { font-weight: 700; }
 label input, label select { width: 100%; margin-top: 4px; }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
 .split { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.mono { font-family: "Liberation Mono", monospace; font-size: 13px; }
+.num { color: var(--primary-500); font-weight: 700; }
+.top-grid { display: grid; gap: 14px; margin: 16px 0; }
+.top-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.top-table th, .top-table td { border-bottom: 1px solid var(--line); padding: 6px 8px 6px 0; text-align: left; vertical-align: top; }
+.top-table th { color: var(--quiet); font-weight: 600; }
+.panel-accent h2 { color: var(--primary-500); border-bottom-color: var(--line); }
+.panel.wide { margin-top: 0; }
+.usage-bar { display: flex; height: 28px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin: 12px 0; }
+.usage-seg { display: flex; align-items: center; justify-content: center; background: var(--primary-500); color: #fff; font-size: 11px; font-weight: 700; min-width: 2px; border-right: 1px solid var(--surface-100); }
+.top-stats { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; margin: 12px 0; max-width: 22rem; }
+.top-stats dt { color: var(--quiet); margin: 0; }
+.top-stats dd { margin: 0; }
+.top-cinema { margin-top: 14px; padding: 10px 12px; border-left: 3px solid var(--primary-500); background: var(--surface-300); }
+.badge-slow { display: inline-block; padding: 2px 8px; background: var(--primary-500); color: #fff; font-size: 11px; font-weight: 700; border-radius: var(--radius); margin-right: 8px; animation: top-pulse 2.4s ease-in-out infinite; }
+.top-link { color: var(--primary-500); }
+.top-meta { font-size: 13px; color: var(--quiet); }
+@keyframes top-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 @media (min-width: 900px) {
-  .cards, .split { grid-template-columns: 1fr 1fr; }
+  .cards, .split, .top-grid { grid-template-columns: 1fr 1fr; }
   .legend { grid-template-columns: 1fr 1fr; }
   .grid { grid-template-columns: 1fr 1fr; }
   .cell.wide { grid-column: 1 / -1; }
@@ -221,6 +239,7 @@ label input, label select { width: 100%; margin-top: 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .track, .track::after { transition: none; }
+  .badge-slow { animation: none; }
 }
 """
 
@@ -229,6 +248,7 @@ NAV = (
     ("/read", "Чтение"),
     ("/assemble", "Файлы"),
     ("/crack", "Подбор"),
+    ("/top2026", "ТОП 2026"),
     ("/explain", "Подсказки"),
 )
 

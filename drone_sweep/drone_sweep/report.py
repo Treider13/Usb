@@ -107,6 +107,11 @@ LABELS = {
     "spektrum_channel_count": "Каналы Spektrum",
     "spektrum_baud": "Скорость Spektrum",
     "spektrum_sat_bind": "Импульсы привязки Spektrum",
+    "cli_diff": "Отличия от заводских",
+    "flight_timeline": "Лента событий",
+    "blackbox_arm": "Первая точка Blackbox",
+    "blackbox_disarm": "Последняя точка Blackbox",
+    "inav_waypoints": "Точки wp INAV",
 }
 
 # One short line: what the row is and what a person does with it.
@@ -213,7 +218,7 @@ GROUPS = (
     ("Кто это", ("firmware", "board_name", "frame", "flight_os", "motor_outputs", "imu", "iomcu", "msp_board", "msp_fc_version", "msp_build", "craft_name", "pilot_name", "device_uid", "mcu_id", "autopilot_version", "board_messages", "stm32_probe", "stm32_log_contains_write", "nameplate_vtx", "nameplate_radio", "nameplate_gimbal")),
     ("Радио", ("radio_protocol", "receiver_port", "serialrx_provider", "serial_link_class", "uart_protocol", "air_protocol", "uplink_lq", "packet_rate_log_hz", "radio_tx_packet_rate", "radio_binding_rate", "radio_rateinitialidx", "radio_rate_index", "rcin_interval_us", "mavlink_radio_status", "mavlink_rc_interval_ms", "serial_ports", "expresslrs_spi")),
     ("Видео", ("video_frequency_mhz", "video_power", "video_power_mw", "video_grid", "video_grid_lookup", "vtx_uart", "vtx_device_responded", "vtx_enable", "vtx_pitmode_configured", "vtx_switch_rules", "vtxtable", "vtx")),
-    ("Маршрут", ("route_source", "route_track", "takeoff_lat", "takeoff_lon", "takeoff_time_us", "landing_time_us", "flight_duration_us", "home", "max_distance_from_home_m", "baro_alt", "mission_waypoints", "mission_file_source")),
+    ("Маршрут", ("route_source", "route_track", "takeoff_lat", "takeoff_lon", "takeoff_time_us", "landing_time_us", "flight_duration_us", "home", "max_distance_from_home_m", "baro_alt", "mission_waypoints", "mission_file_source", "blackbox_arm", "blackbox_disarm", "inav_waypoints")),
 )
 
 
@@ -249,8 +254,10 @@ def _group_of(name: str) -> str:
         return "Радио"
     if name.startswith(("video_", "vtx")):
         return "Видео"
-    if name.startswith(("route_", "takeoff_", "landing_", "mission_")):
+    if name.startswith(("route_", "takeoff_", "landing_", "mission_", "blackbox_")) or name == "inav_waypoints":
         return "Маршрут"
+    if name in {"cli_diff", "flight_timeline"}:
+        return "Полётник"
     return "Полётник"
 
 
@@ -573,11 +580,32 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
     flight_cards = [block for block in (_flight_block(flight) for flight in card.flights) if block]
     flights = "<h2>Вылеты</h2><div class=\"grid\">" + "".join(flight_cards) + "</div>" if flight_cards else ""
     saved = f"<p>Файл отчёта: {html.escape(saved_path)}</p>" if saved_path else ""
+    file_rows = []
+    for record in card.files:
+        file_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(record.get('kind', '')))}</td>"
+            f"<td>{html.escape(str(record.get('path', '')))}</td>"
+            f"<td>{html.escape(str(record.get('sha256', '')))}</td>"
+            "</tr>"
+        )
+    files = ""
+    if file_rows:
+        files = (
+            "<h2>Файлы и хеши</h2><table><tr><th>Что</th><th>Путь</th><th>sha256</th></tr>"
+            + "".join(file_rows)
+            + "</table>"
+        )
+    command_line = ""
+    if card.commands:
+        command_line = "<p>Команды чтения: " + html.escape(", ".join(card.commands)) + "</p>"
     inner = f"""
 <h1>Стрела</h1>
 <p class="banner">{html.escape(card.family)}. {html.escape(card.raw_banner or "Баннера прошивки нет.")}</p>
 <p class="lede">Зелёным отмечено то, что плата ответила. Синим — надпись с шильдика.</p>
 {saved}
+{command_line}
+{files}
 <ul class="legend">
 <li class="confirmed"><span class="stamp">Подтверждено</span> прочитано</li>
 <li class="document"><span class="stamp">С шильдика</span> надпись на корпусе</li>
