@@ -1,9 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "drone-sweep"
-version = "0.1.0"
-description = "Read-only forensic card for Betaflight, INAV and ArduPilot vehicles."
+name = "strela"
+version = "0.2.0"
+description = "Стрела: read-only drone card from Betaflight, INAV, ArduPilot and ExpressLRS."
 requires-python = ">=3.11"
-dependencies = ["pymavlink==2.4.43"]
+dependencies = ["pymavlink==2.4.43", "pyserial==3.5"]
+
+[project.scripts]
+strela = "drone_sweep.menu:main"
+
+[tool.setuptools.packages.find]
+include = ["drone_sweep*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

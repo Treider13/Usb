@@ -31,7 +31,7 @@ def render_html(card: Card) -> str:
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>Карточка дрона</title>
+<title>Стрела — карточка дрона</title>
 <style>
 body {{ font-family: sans-serif; margin: 24px; }}
 table {{ border-collapse: collapse; width: 100%; }}
@@ -43,7 +43,7 @@ td, th {{ border: 1px solid #ccc; padding: 6px; vertical-align: top; }}
 </style>
 </head>
 <body>
-<h1>Карточка дрона — {html.escape(card.family)}</h1>
+<h1>Стрела — {html.escape(card.family)}</h1>
 <p>Баннер: {html.escape(card.raw_banner or "нет")}</p>
 <h2>Что делать, если вы здесь первый раз</h2>
 <ol>{hints}</ol>

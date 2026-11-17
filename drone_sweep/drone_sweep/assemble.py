@@ -132,6 +132,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         provider = dump.settings.get("serialrx_provider")
         if provider is not None:
             card.put("serialrx_provider", confirmed(provider, "dump all"))
+            _serialrx_class(card, provider)
         else:
             card.put("serialrx_provider", missing("в dump all нет serialrx_provider", "dump all"))
         express = {key: value for key, value in dump.settings.items() if key.startswith("expresslrs_")}
@@ -164,6 +165,29 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         _known_params(card, params)
         _baro(card, rows)
         _messages_with_rcin(card, rows, messages)
+
+
+def _serialrx_class(card: Card, provider: str) -> None:
+    """Names from Betaflight src/main/rx/rx.h SerialRXType.
+
+    SPEKTRUM2048 and SPEKTRUM1024 are the DSM2/DSMX class. OrangeRX uses
+    that class, but the CLI name alone is not the brand on the nameplate.
+    CRSF on the UART is not the air protocol.
+    """
+    name = provider.strip().upper()
+    if name in {"SPEKTRUM2048", "SPEKTRUM1024"}:
+        card.put("serial_link_class", confirmed("DSM2/DSMX", "betaflight rx.h"))
+        card.put(
+            "uplink_lq",
+            not_applicable("в rx.h у SPEKTRUM нет источника LQ класса CRSF", "betaflight rx.h"),
+        )
+        return
+    if name == "CRSF":
+        card.put("uart_protocol", confirmed("CRSF", "dump all"))
+        card.put(
+            "air_protocol",
+            missing("CRSF на UART не называет протокол в воздухе", "dump all"),
+        )
 
 
 def _known_params(card: Card, params: dict) -> None:
@@ -281,7 +305,7 @@ def _radio_fields(card: Card, inputs: Inputs) -> None:
         card.put("radio_protocol", missing("в странице или образе нет строки MILELRS, ExpressLRS или mLRS", "radio"))
         return
     card.put("radio_protocol", confirmed(reading.firmware, "radio firmware string"))
-    for key in ("version", "model", "chip", "domain", "uid", "serial_protocol", "uart_baud", "rate_index", "rateinitialidx", "model_id"):
+    for key in ("version", "model", "chip", "domain", "uid", "serial_protocol", "uart_baud", "rate_index", "rateinitialidx", "model_id", "tx_packet_rate", "target", "module_type", "git_commit"):
         if key in reading.fields:
             card.put(f"radio_{key}", confirmed(reading.fields[key], "radio"))
     if reading.firmware == "MILELRS":

@@ -1,0 +1,2 @@
+[console_scripts]
+strela = drone_sweep.menu:main

@@ -1,0 +1,167 @@
+import json
+import threading
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+import pytest
+
+from drone_sweep.assemble import Inputs, assemble
+from drone_sweep.elrs_http import FORBIDDEN_PATHS, READ_PATHS, RadioAuthRequired, fetch_pages, normalize_pages
+from drone_sweep.menu import main, run_menu
+from drone_sweep.webapp import StrelaHandler
+from tests.test_card import BOXES, DUMP
+
+
+def test_menu_builds_the_b162_card(tmp_path: Path):
+    dump = tmp_path / "dump.txt"
+    dump.write_text(DUMP, encoding="utf-8")
+    boxes = tmp_path / "boxes.txt"
+    boxes.write_text(BOXES, encoding="utf-8")
+    out = tmp_path / "out"
+    lines = ["1", str(dump), str(boxes), *([""] * 12), str(out), "5"]
+    text = run_menu(lines)
+    assert "Стрела" in text
+    assert "Отчёт:" in text
+    page = (out / "report.html").read_text(encoding="utf-8")
+    assert "LAZYFLY" in page
+    assert "Blink" in page
+    assert "Стрела" in page
+
+
+def test_menu_explain_and_unknown_item():
+    text = run_menu(["2", "9", "5"])
+    assert "Пароль страницы" in text
+    assert "Такого пункта нет" in text
+    assert "Выход" in text
+
+
+def test_check_command_refuses_save():
+    assert main(["check-command", "save"]) == 2
+    assert main(["check-command", "dump all"]) == 0
+
+
+def test_web_menu_and_post(tmp_path: Path):
+    dump = tmp_path / "dump.txt"
+    dump.write_text(DUMP, encoding="utf-8")
+    boxes = tmp_path / "boxes.txt"
+    boxes.write_text(BOXES, encoding="utf-8")
+    out = tmp_path / "web-out"
+    server = ThreadingHTTPServer(("127.0.0.1", 0), StrelaHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        home = urlopen(f"http://127.0.0.1:{port}/").read().decode("utf-8")
+        assert "Стрела" in home
+        assert "Собрать карточку" in home
+        explain = urlopen(f"http://127.0.0.1:{port}/explain").read().decode("utf-8")
+        assert "парол" in explain.lower()
+        payload = urlencode(
+            {
+                "dump": str(dump),
+                "boxnames": str(boxes),
+                "out": str(out),
+                "nameplate_vtx": "Skyzone VT7550",
+            }
+        ).encode()
+        page = urlopen(Request(f"http://127.0.0.1:{port}/assemble", data=payload)).read().decode("utf-8")
+    finally:
+        server.shutdown()
+    assert "LAZYFLY" in page
+    assert "Skyzone VT7550" in page
+    card = json.loads((out / "card.json").read_text(encoding="utf-8"))
+    assert card["fields"]["craft_name"]["value"] == "Blink"
+    assert card["fields"]["nameplate_vtx"]["status"] == "document"
+
+
+def test_elrs_rx_page_has_no_packet_rate_and_keeps_secrets_out():
+    pages = {
+        "/config": {
+            "settings": {
+                "product_name": "LR1824 Dual RX",
+                "version": "MILELRS_v437",
+                "radio-type": "LR1121",
+                "target": "LR1824",
+                "module-type": "RX",
+            },
+            "config": {"uid": [1, 2, 3, 4, 5, 6], "serial-protocol": 1, "modelid": 0},
+        },
+        "/options.json": {
+            "custom-freq": "1900-1920",
+            "binding-rate": 44,
+            "wifi-password": "do-not-store",
+            "binding-phrase": "do-not-store-phrase",
+        },
+        "/hardware.json": {},
+    }
+    normalized = normalize_pages(pages)
+    assert "packet-rate" not in normalized
+    assert "tx_packet_rate" not in normalized
+    assert normalized["version"] == "MILELRS_v437"
+    assert normalized["custom_freq"] == "1900-1920"
+    card = assemble(Inputs(radio_json=normalized))
+    dumped = json.dumps(card.to_dict())
+    assert "do-not-store" not in dumped
+    assert card.fields["radio_protocol"].value == "MILELRS"
+    assert card.fields["radio_binding_rate"].value == "44"
+    assert card.fields["radio_uid"].value == "1,2,3,4,5,6"
+    assert "packet_rate_log_hz" not in card.fields or card.fields.get("packet_rate_log_hz") is None
+
+
+def test_elrs_tx_export_packet_rate_is_a_separate_field():
+    pages = {
+        "/config": {
+            "settings": {"product_name": "TX", "version": "3.5.3", "module-type": "TX"},
+            "config": {"model": {"0": {"packet-rate": 6}}, "uid": [9]},
+        }
+    }
+    normalized = normalize_pages(pages)
+    assert normalized["tx_packet_rate"] == 6
+    assert normalized["version"].startswith("ExpressLRS")
+    card = assemble(Inputs(radio_json=normalized))
+    assert card.fields["radio_tx_packet_rate"].value == "6"
+    assert card.fields["radio_swarm_id"].status == "not_applicable"
+
+
+def test_fetch_stops_on_401_and_never_calls_write_routes():
+    seen = []
+
+    def opener(url, timeout=5.0):
+        seen.append(url)
+        from urllib.error import HTTPError
+
+        raise HTTPError(url, 401, "auth", hdrs=None, fp=None)
+
+    with pytest.raises(RadioAuthRequired):
+        fetch_pages("http://10.0.0.1", opener=opener)
+    assert seen == ["http://10.0.0.1/config"]
+    assert not any(path in seen[0] for path in FORBIDDEN_PATHS)
+    assert READ_PATHS[0] == "/config"
+
+
+def test_spektrum_has_no_crsf_link_quality():
+    card = assemble(Inputs(dump_text="set serialrx_provider = SPEKTRUM2048\n", banner="Betaflight 4.5.0"))
+    assert card.fields["serial_link_class"].value == "DSM2/DSMX"
+    assert card.fields["uplink_lq"].status == "not_applicable"
+    assert card.fields["radio_protocol"].status == "missing"
+
+
+def test_crsf_on_the_uart_does_not_name_the_air_protocol():
+    card = assemble(Inputs(dump_text="set serialrx_provider = CRSF\n", banner="Betaflight 4.5.0"))
+    assert card.fields["uart_protocol"].value == "CRSF"
+    assert card.fields["air_protocol"].status == "missing"
+
+
+def test_orange_nameplate_stays_a_nameplate():
+    card = assemble(
+        Inputs(
+            dump_text="set serialrx_provider = SPEKTRUM2048\n",
+            banner="Betaflight 4.5.0",
+            nameplates={"radio": "OrangeRX"},
+        )
+    )
+    assert card.fields["nameplate_radio"].status == "document"
+    assert card.fields["nameplate_radio"].value == "OrangeRX"
+    assert card.fields["radio_protocol"].status == "missing"

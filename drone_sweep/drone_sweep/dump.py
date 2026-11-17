@@ -46,8 +46,10 @@ class Dump:
     failsafe: dict[str, str] = field(default_factory=dict)
 
 
-def parse_boxnames(text: str) -> list[str]:
+def parse_boxnames(text: str | None) -> list[str]:
     """MSP_BOXNAMES is one line of names separated by semicolons."""
+    if not text:
+        return []
     body = text.strip()
     if not body:
         return []

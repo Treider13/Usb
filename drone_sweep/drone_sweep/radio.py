@@ -31,6 +31,10 @@ PUBLIC_KEYS = {
     "vx_table",
     "vx_bands",
     "modulation_mode",
+    "tx_packet_rate",
+    "target",
+    "module_type",
+    "git_commit",
 }
 
 
