@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sqlite3
 from pathlib import Path
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass
@@ -46,7 +47,108 @@ def build_memory_table(wordlist: Path, *, encoding: str = "utf-8") -> MemoryRain
     return MemoryRainbowStore(table)
 
 
-def load_memory_table(path: Path) -> MemoryRainbowStore:
+SQLITE_SUFFIX = ".sqlite"
+ROCKYOU_SQLITE_MIN_BYTES = 20_000_000
+
+
+@dataclass
+class SqliteRainbowStore:
+    path: Path
+    _conn: sqlite3.Connection | None = None
+
+    def _connection(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._conn = sqlite3.connect(self.path)
+        return self._conn
+
+    def get(self, uid_hex: str) -> str | None:
+        row = self._connection().execute(
+            "SELECT phrase FROM rainbow WHERE uid_hex = ?",
+            (uid_hex.upper(),),
+        ).fetchone()
+        return str(row[0]) if row else None
+
+    def set_many(self, rows: Sequence[tuple[str, str]]) -> None:
+        if not rows:
+            return
+        self._connection().executemany(
+            "INSERT OR REPLACE INTO rainbow (uid_hex, phrase) VALUES (?, ?)",
+            [(key.upper(), phrase) for key, phrase in rows],
+        )
+        self._connection().commit()
+
+    def close(self) -> None:
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+
+def table_path_for_wordlist(wordlist: Path, json_table_path: Path) -> Path:
+    """rockyou и другие гигантские списки — SQLite на диске, без RAM на миллионы строк."""
+    try:
+        if wordlist.stat().st_size >= ROCKYOU_SQLITE_MIN_BYTES:
+            return json_table_path.with_suffix(SQLITE_SUFFIX)
+    except OSError:
+        pass
+    return json_table_path
+
+
+def build_memory_table_sqlite(
+    wordlist: Path,
+    db_path: Path,
+    *,
+    encoding: str = "utf-8",
+    batch_size: int = 8_000,
+    on_progress: Callable[[int], None] | None = None,
+) -> SqliteRainbowStore:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if db_path.exists():
+        db_path.unlink()
+    store = SqliteRainbowStore(db_path)
+    conn = store._connection()
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("CREATE TABLE rainbow (uid_hex TEXT PRIMARY KEY, phrase TEXT NOT NULL)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_rainbow_uid ON rainbow(uid_hex)")
+    batch: list[tuple[str, str]] = []
+    processed = 0
+    for phrase, _ in iter_wordlist_lines(wordlist, encoding=encoding):
+        batch.append((binding_phrase_uid_hex(phrase), phrase))
+        if len(batch) >= batch_size:
+            store.set_many(batch)
+            processed += len(batch)
+            batch.clear()
+            if on_progress is not None:
+                on_progress(processed)
+    if batch:
+        store.set_many(batch)
+        processed += len(batch)
+        if on_progress is not None:
+            on_progress(processed)
+    return store
+
+
+def build_and_save_table(
+    wordlist: Path,
+    table_path: Path,
+    *,
+    encoding: str = "utf-8",
+    on_progress: Callable[[int], None] | None = None,
+) -> Path:
+    """Пишет JSON или SQLite; возвращает фактический путь таблицы."""
+    target = table_path_for_wordlist(wordlist, table_path)
+    if target.suffix == SQLITE_SUFFIX:
+        build_memory_table_sqlite(wordlist, target, encoding=encoding, on_progress=on_progress)
+        return target
+    save_memory_table(build_memory_table(wordlist, encoding=encoding), target)
+    return target
+
+
+def load_memory_table(path: Path) -> MemoryRainbowStore | SqliteRainbowStore:
+    if path.suffix == SQLITE_SUFFIX or path.name.endswith(SQLITE_SUFFIX):
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        return SqliteRainbowStore(path)
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("файл таблицы должен быть JSON-объектом")

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .elrs_assemble import search_binding_sources
-from .elrs_rainbow import build_memory_table, save_memory_table
+from .elrs_rainbow import build_and_save_table
 from .elrs_resources import INSTALL_PRESET_ORDER, WORDLIST_PRESETS, fetch_wordlist_preset
 
 MANIFEST_VERSION = 2
@@ -176,6 +176,7 @@ def run_setup(
     data_dir: Path | None = None,
     force: bool = False,
     quiet: bool = False,
+    presets: tuple[str, ...] | None = None,
 ) -> SetupResult:
     root = resolve_data_dir(data_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -187,7 +188,12 @@ def run_setup(
     failed: list[str] = []
     ready_wordlists: list[Path] = []
 
-    for preset in INSTALL_PRESET_ORDER:
+    order = presets if presets is not None else INSTALL_PRESET_ORDER
+    for preset in order:
+        if preset not in INSTALL_PRESET_ORDER and preset != "elrs_rainbow":
+            if not quiet:
+                print(f"Пропуск неизвестного пресета {preset}", file=sys.stderr)
+            continue
         label = WORDLIST_PRESETS.get(preset, (preset, ""))[0]
         wordlist_path = root / "wordlists" / f"{preset}.txt"
         table_path = root / "tables" / f"{preset}-memory.json"
@@ -198,14 +204,28 @@ def run_setup(
                     print(f"Скачиваю словарь {preset}…", file=sys.stderr)
                 fetch_wordlist_preset(preset, wordlist_path, timeout=timeout)
                 created.append(str(wordlist_path))
-            if force or not table_path.is_file():
+            actual_table = table_path.with_suffix(".sqlite") if preset == "rockyou" else table_path
+            need_table = force or not (table_path.is_file() or actual_table.is_file())
+
+            def _progress(count: int) -> None:
+                if not quiet and preset == "rockyou" and count and count % 500_000 == 0:
+                    print(f"  …{count // 1000}k фраз", file=sys.stderr)
+
+            if need_table:
                 if not quiet:
-                    print(f"Таблица UID для {preset}…", file=sys.stderr)
-                save_memory_table(build_memory_table(wordlist_path), table_path)
-                created.append(str(table_path))
+                    hint = " (SQLite на диске, мало RAM)" if preset == "rockyou" else ""
+                    print(f"Таблица UID для {preset}{hint}…", file=sys.stderr)
+                actual_table = build_and_save_table(
+                    wordlist_path,
+                    table_path,
+                    on_progress=_progress if preset == "rockyou" else None,
+                )
+                created.append(str(actual_table))
+            elif actual_table.is_file():
+                pass
             sources[preset] = {
                 "wordlist": str(wordlist_path),
-                "memory_table": str(table_path),
+                "memory_table": str(actual_table if actual_table.is_file() else table_path),
                 "label": label,
             }
             if preset != "rockyou":
@@ -225,7 +245,7 @@ def run_setup(
         count = _merge_wordlists(ready_wordlists, combined_path)
         if not quiet:
             print(f"Объединённый словарь: {count} строк", file=sys.stderr)
-        save_memory_table(build_memory_table(combined_path), combined_table)
+        build_and_save_table(combined_path, combined_table)
         sources["combined"] = {
             "wordlist": str(combined_path),
             "memory_table": str(combined_table),

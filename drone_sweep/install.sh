@@ -11,6 +11,7 @@ python3 -m venv .venv || {
 export STRELA_DATA="$PWD/strela-data"
 .venv/bin/strela setup
 echo "Стрела установлена."
-echo "Данные:      $STRELA_DATA (словарь ELRS и RAM-таблица)"
+echo "Данные:      $STRELA_DATA (все словари; rockyou — таблица SQLite)"
+echo "Без rockyou: STRELA_DATA=$STRELA_DATA $PWD/.venv/bin/strela setup --lite"
 echo "Запуск меню: $PWD/.venv/bin/strela"
 echo "Страница:    STRELA_DATA=$STRELA_DATA $PWD/.venv/bin/strela serve --port 8765"

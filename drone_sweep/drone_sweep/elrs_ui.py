@@ -11,7 +11,7 @@ from .assemble import Inputs, assemble
 from .dump_elrs import public_extraction_summary
 from .elrs_drone_read import capture_drone_flash_bytes, read_drone_elrs_html
 from .elrs_assemble import search_binding_sources
-from .elrs_binding import binding_phrase_to_uid, parse_uid_field, uid_bytes_to_hex
+from .elrs_binding import binding_phrase_md5_hex, binding_phrase_to_uid, parse_uid_field, uid_bytes_to_hex
 from .elrs_rainbow import build_memory_table, save_memory_table
 from .menu import write_report
 from .report import render_html
@@ -114,9 +114,11 @@ def _resolve_flash_input(
 
 
 def _phrase_panel(phrase: str, *, extra: str = "") -> str:
+    md5_full = binding_phrase_md5_hex(phrase)
     return (
         "<article class='panel'><h2>Binding phrase</h2>"
         f"<p class='value-big'><code>{html.escape(phrase)}</code></p>"
+        f"<p class='help'>MD5 define (мертвый хэш в прошивке): <code>{html.escape(md5_full)}</code></p>"
         f"{extra}"
         "<p class='help'>Пароль Wi‑Fi для этого не нужен. В отчёт Стрелы текст фразы "
         "по умолчанию не пишется — только статус <code>radio_binding_phrase_crack</code>.</p>"
@@ -161,7 +163,9 @@ def handle_elrs_form(
             drone_html
             + "<article class='panel'><h2>Из flash (dump_elrs)</h2>"
             f"<pre>{text}</pre>"
-            "<p class='help'>Здесь показываем пароль WebUI приёмника, если он в конфиге; в карточку вылета он не пишется.</p>"
+            "<p class='help'>Отпечаток образа: <code>md5</code>/<code>sha256</code> (как CIRCL). "
+            "<code>uid</code>/<code>uid_hex</code> — шесть байт MD5 фразы в прошивке; "
+            "<code>binding_md5_hex</code> — полный MD5 define, если фраза есть в JSON или после подбора.</p>"
             "</article>"
         )
         inline_phrase = _binding_phrase_in_summary(summary)
