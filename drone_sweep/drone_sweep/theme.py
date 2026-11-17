@@ -187,14 +187,16 @@ ol.steps li { margin: 8px 0; }
 .cell.missing .stamp, .legend .missing .stamp { color: #ff5a5a; border-color: #ff5a5a; }
 .cell.not_applicable .stamp, .legend .not_applicable .stamp { color: var(--muted); border-color: var(--muted); }
 .grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
-.cell { background: var(--surface-200); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+.cell { position: relative; background: var(--surface-200); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
 .cell h3 { margin: 0 0 4px; font-size: 16px; }
 .key { margin: 0; font-family: "Liberation Mono", monospace; font-size: 12px; color: var(--muted); }
+.cell .key, .cell .src, .hole .key { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .value table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .value th, .value td { border-bottom: 1px solid var(--line); text-align: left; padding: 3px 8px 3px 0; vertical-align: top; font-weight: 400; }
 .value th { width: 32%; color: var(--quiet); }
 .value pre { white-space: pre-wrap; margin: 4px 0 10px; }
 .why, .src { margin: 0; font-size: 14px; color: var(--quiet); }
+.blurb { color: var(--quiet); margin: 0 0 10px; }
 .hole { border-left: 4px solid #ff5a5a; padding: 4px 0 4px 12px; margin: 12px 0; }
 label { display: block; margin: 14px 0; max-width: 72ch; }
 label .title { font-weight: 700; }

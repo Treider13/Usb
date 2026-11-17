@@ -15,13 +15,17 @@ def test_report_names_fields_in_russian_and_keeps_every_key():
     assert "Нет данных" in page
     assert "С шильдика" in page
     assert "Skyzone VT7550" in page
-    assert "С чего начать" in page
+    assert "С чего начать" not in page
+    assert "Откуда маршрут" not in page
+    assert "usb STATUSTEXT" not in page
+    assert "из баннера" not in page
     assert "strela" not in page.lower() or "Стрела" in page
     for name, item in card.fields.items():
         if item.status == "not_applicable":
             continue
         assert f">{name}<" in page or f">{name}</p>" in page
     assert 'class="key">' in page
+    assert "Какая плата" in page
     assert "--primary-500: #ffbb00" in page
     assert "#e5f6e5" not in page
 

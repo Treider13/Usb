@@ -5,7 +5,6 @@ from __future__ import annotations
 import html
 import json
 
-from .hints import WORKFLOW
 from .model import Card
 from .theme import page
 
@@ -108,12 +107,124 @@ LABELS = {
     "spektrum_sat_bind": "Импульсы привязки Spektrum",
 }
 
+# One short line: what the row is and what a person does with it.
+USE = {
+    "board_name": "Какая плата. Сверьте с надписью на полётнике.",
+    "firmware": "Какая прошивка и какой версии. По ней видно, какой это борт.",
+    "frame": "Тип рамы: сколько моторов и какая схема. Нужно, чтобы понять конструкцию борта.",
+    "flight_os": "Система на плате. Для опознания, не для настройки.",
+    "motor_outputs": "Какие выходы идут на моторы. Смотрите, если мотор молчит не на том канале.",
+    "imu": "Как опрашивается гироскоп. Дрожь борта смотрите в вибрации, не здесь.",
+    "iomcu": "Вторая микросхема платы, если она есть.",
+    "msp_fc_version": "Версия, которую плата назвала сама.",
+    "msp_board": "Имя платы из ответа прошивки. Сверьте с корпусом.",
+    "msp_build": "Дата и номер сборки. Отличает одну прошивку от другой.",
+    "craft_name": "Позывной борта, записанный в полётнике.",
+    "pilot_name": "Имя пилота из настроек.",
+    "device_uid": "Номер борта. Им отличают один полётник от другого.",
+    "mcu_id": "Номер микросхемы. Им отличают плату, даже если имя совпало.",
+    "nameplate_vtx": "Надпись с корпуса видеопередатчика. Это не частота этого вылета.",
+    "nameplate_radio": "Надпись с корпуса радиомодуля. Протокол по ней не называют.",
+    "nameplate_gimbal": "Надпись с корпуса подвеса. Настройка подвеса остаётся отдельно.",
+    "stm32_probe": "Какой чип увидели в сохранённом чтении. Сверьте с платой.",
+    "stm32_log_contains_write": "В принесённом журнале была запись в чип. Карточка её не повторяет.",
+    "serialrx_provider": "Какой протокол приёмника выбран в полётнике.",
+    "serial_link_class": "Какого типа связь с пультом.",
+    "uart_protocol": "Какой протокол пульта плата приняла. По нему видно, чем связан приёмник.",
+    "air_protocol": "Протокол в воздухе. Это не герцы и не скорость пакетов.",
+    "uplink_lq": "Насколько живая связь с пульта. Чем ниже, тем ближе отказ связи.",
+    "radio_protocol": "Какая прошивка на приёмнике.",
+    "receiver_port": "В какой разъём воткнут приёмник.",
+    "serial_ports": "Какие разъёмы заняты и чем.",
+    "vtx_uart": "Куда подключён видеопередатчик.",
+    "packet_rate_log_hz": "Герцы пульта в момент взведения. Это не индекс в настройках приёмника.",
+    "radio_tx_packet_rate": "Индекс скорости из пульта. В герцы его не переводят.",
+    "radio_binding_rate": "Вариант привязки приёмника. Это индекс, не герцы.",
+    "radio_rateinitialidx": "Индекс режима приёмника. Не частота этого вылета.",
+    "radio_rate_index": "Индекс режима. Не герцы.",
+    "rcin_interval_us": "Как часто журнал пишет стики. Это не скорость радио.",
+    "video_frequency_mhz": "На какой частоте картинка. Этот канал ищите в очках.",
+    "video_power": "Мощность видео индексом из настроек.",
+    "video_power_mw": "Мощность картинки в милливаттах.",
+    "video_grid": "Сетка каналов видео из прошивки.",
+    "video_grid_lookup": "Канал, сохранённый в настройках. Сам передатчик мог не ответить.",
+    "vtx_device_responded": "Ответил ли видеопередатчик. Если нет, частота взята из настроек.",
+    "vtx_switch_rules": "Какой тумблер переключает видео.",
+    "vtx_enable": "Включено ли видео в настройках. Это не ответ передатчика.",
+    "vtx_pitmode_configured": "Тихий режим записан в настройке. Не значит, что он сейчас включён.",
+    "vtxtable": "Таблица каналов видео из прошивки.",
+    "vtx": "Строки видео в дампе. Это правила тумблера, не текущий канал.",
+    "route_source": "Из какого файла взяты точки. Если здесь none, маршрута нет.",
+    "route_track": "Где борт был по спутникам. Без точек маршрута нет.",
+    "takeoff_lat": "Широта взлёта. Первая точка файла точкой взлёта не считается.",
+    "takeoff_lon": "Долгота взлёта. Вместе с широтой это место отрыва.",
+    "takeoff_time_us": "Когда в журнале записано взведение.",
+    "landing_time_us": "Когда в журнале записана посадка.",
+    "flight_duration_us": "Сколько прошло от взведения до посадки по меткам журнала.",
+    "home": "Точка дома. От неё считается, как далеко уходил борт.",
+    "max_distance_from_home_m": "Насколько далеко борт уходил от дома.",
+    "baro_alt": "Высота по давлению. Это не координата и не маршрут.",
+    "mission_waypoints": "Точки задания. Это план, не след полёта.",
+    "mission_file_source": "Откуда взяты точки задания.",
+    "aux": "Что делают тумблеры на пульте.",
+    "failsafe": "Что борт делает при отказе связи.",
+    "osd": "Что выведено на экран в очках.",
+    "osd_layout": "Где на экране в очках какая надпись.",
+    "features": "Какие функции прошивки включены.",
+    "parameters": "Все настройки платы. Ищите нужное имя. Числа здесь не меняются.",
+    "messages": "Что плата написала текстом.",
+    "messages_with_rcin": "Текстовые строки журнала: прошивка, протокол пульта, выходы.",
+    "modes": "Какой режим полёта был в журнале.",
+    "rc_protocols": "Какие протоколы пульта разрешены. «Все» — не имя одного протокола.",
+    "mnt1_type": "Какой подвес прописан. Если строки нет, подвеса в настройках нет.",
+    "cam1_type": "Как подключена камера. Если строки нет, камеры в настройках нет.",
+    "expresslrs_spi": "Настройки приёмника, записанные в полётник.",
+    "blackbox_header": "Шапка журнала Betaflight: версия и позывной.",
+    "radio_secrets_removed": "Пароли и ключи из чтения убраны. В карточке их нет.",
+    "radio_fields_requires_auth": "Страница приёмника просит пароль. Его вводите вы сами, один раз.",
+    "radio_page": "Что прочитано со страницы приёмника.",
+    "cli_sections": "Настройки из дампа, разложенные по разделам.",
+    "cli_commands": "Остальные строки дампа.",
+    "log_schema": "Что записано в открытом журнале. Число — сколько раз, не настройка.",
+    "log_events": "Взведение и посадка в журнале. По ним видно, был ли вылет.",
+    "tlog_schema": "Что есть в телеметрии с земли.",
+    "mavlink_heartbeat": "Плата ответила по USB. По этому ответу она опознана.",
+    "mavlink_radio_status": "Качество связи в телеметрии. Это не скорость пакетов.",
+    "mavlink_rc_interval_ms": "Как часто в телеметрии записаны стики. Не скорость радио.",
+    "autopilot_version": "Номер прошивки, который плата отдала по запросу.",
+    "board_messages": "Другие строки платы. Читайте текст, отдельного поля из них не вышло.",
+    "dataflash_logs": "Файлы журнала в памяти платы. Карточка открывает последний ненулевой.",
+    "spektrum_channel_count": "Сколько каналов у Spektrum.",
+    "spektrum_baud": "Скорость линии Spektrum.",
+    "spektrum_sat_bind": "Импульсы привязки записаны. Команда привязки не отправляется.",
+}
+
+GROUP_USE = {
+    "Кто это": "Кто этот борт: прошивка, плата и рама.",
+    "Радио": "Чем борт связан с пультом и насколько связь живая.",
+    "Видео": "На какой частоте картинка и какой мощностью.",
+    "Маршрут": "Где борт был. Без спутников со статусом 3D маршрута не будет.",
+    "Полётник": "Настройки и то, что плата записала в журнал.",
+}
+
 GROUPS = (
     ("Кто это", ("firmware", "board_name", "frame", "flight_os", "motor_outputs", "imu", "iomcu", "msp_board", "msp_fc_version", "msp_build", "craft_name", "pilot_name", "device_uid", "mcu_id", "autopilot_version", "board_messages", "stm32_probe", "stm32_log_contains_write", "nameplate_vtx", "nameplate_radio", "nameplate_gimbal")),
     ("Радио", ("radio_protocol", "receiver_port", "serialrx_provider", "serial_link_class", "uart_protocol", "air_protocol", "uplink_lq", "packet_rate_log_hz", "radio_tx_packet_rate", "radio_binding_rate", "radio_rateinitialidx", "radio_rate_index", "rcin_interval_us", "mavlink_radio_status", "mavlink_rc_interval_ms", "serial_ports", "expresslrs_spi")),
     ("Видео", ("video_frequency_mhz", "video_power", "video_power_mw", "video_grid", "video_grid_lookup", "vtx_uart", "vtx_device_responded", "vtx_enable", "vtx_pitmode_configured", "vtx_switch_rules", "vtxtable", "vtx")),
     ("Маршрут", ("route_source", "route_track", "takeoff_lat", "takeoff_lon", "takeoff_time_us", "landing_time_us", "flight_duration_us", "home", "max_distance_from_home_m", "baro_alt", "mission_waypoints", "mission_file_source")),
 )
+
+
+def _use(name: str) -> str:
+    if name in USE:
+        return USE[name]
+    if name.startswith(("fs_", "batt_fs")):
+        return "Что борт делает при отказе связи, газа или батареи."
+    if name.startswith("radio_"):
+        return "Поле со страницы приёмника. Пароли сюда не попадают."
+    if name.startswith("nameplate_"):
+        return "Надпись с корпуса. Это не измерение этого вылета."
+    return "Прочитано с борта. Строка есть — значение настоящее."
 
 
 def _label(name: str) -> str:
@@ -206,10 +317,18 @@ def _log_summary(value: dict) -> str:
         if isinstance(entry, dict):
             service += int(entry.get("count") or 0)
     if service:
-        lines.append(f"<li>Служебные кадры журнала — {service}. Их поля в карточку не выписываются.</li>")
-    if not lines:
-        return "<p>—</p>"
-    return "<ul>" + "".join(lines) + "</ul>"
+        lines.append(f"<li>Служебные расчёты платы — {service}. Их читать не нужно.</li>")
+    dataflash = any(name in value for name in ("RCIN", "PARM", "BARO", "MSG"))
+    if dataflash and "GPS" not in seen and "GPS2" not in seen:
+        action = "Спутников в этом журнале нет, поэтому маршрута из него не будет. Смотрите то, что в списке есть: стики, высота, батарея, моторы."
+    else:
+        action = "Строка есть в списке — она уже разобрана в карточке. Строки нет — плата это не писала, значение не появится."
+    intro = "Это состав одного открытого файла. Число — сколько раз плата записала строку. Это не настройка, менять его не нужно."
+    return (
+        f"<p>{html.escape(intro)}</p><ul>"
+        + "".join(lines)
+        + f"</ul><p>Что делать: {html.escape(action)}</p>"
+    )
 
 
 def _message_lines(value: list) -> str:
@@ -257,6 +376,8 @@ def _value_html(value) -> str:
         return _log_summary(value)
     if isinstance(value, list) and value and all(isinstance(item, dict) and "text" in item for item in value):
         return _message_lines(value)
+    if isinstance(value, list) and value and all(isinstance(item, dict) and item.get("name") == "LOG_ENTRY" for item in value):
+        return _logs_on_board(value)
     if isinstance(value, dict) and value and all(isinstance(item, list) for item in value.values()):
         rows = []
         for name, lines in value.items():
@@ -308,6 +429,41 @@ def _event_cell(key: str, value) -> str:
     return "" if value is None else str(value)
 
 
+def _bytes_plain(size: int) -> str:
+    if size >= 1024:
+        return f"{round(size / 1024)} КБ"
+    return f"{size} байт"
+
+
+def _logs_on_board(rows: list) -> str:
+    """LOG_ENTRY list: how many journals sit on the board, and which one this card opened."""
+    files = []
+    total = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            ident = int(row.get("id"))
+            size = int(row.get("size") or 0)
+        except (TypeError, ValueError):
+            continue
+        total = max(total, int(row.get("num_logs") or 0))
+        files.append((ident, size))
+    if not files:
+        return "<p>Плата не прислала ни одного журнала.</p>"
+    total = total or len(files)
+    nonempty = [item for item in files if item[1] > 0]
+    newest = max(nonempty) if nonempty else None
+    lines = [f"На плате журналов: {total}."]
+    if newest:
+        lines.append(f"Эта карточка открыла последний ненулевой: номер {newest[0]}, {_bytes_plain(newest[1])}.")
+    earlier = len(nonempty) - (1 if newest else 0)
+    if earlier > 0:
+        lines.append(f"Более ранних журналов: {earlier}. Эта карточка их не открывает.")
+    lines.append("Что делать: читать карточку, она уже по открытому журналу. Старые журналы с платы не стирайте. Другой вылет — это другой номер в этом списке.")
+    return "".join(f"<p>{html.escape(line)}</p>" for line in lines)
+
+
 def _record_table(value) -> str:
     if not isinstance(value, list) or not value or not all(isinstance(item, dict) for item in value):
         return ""
@@ -346,8 +502,7 @@ def _cell(name: str, item) -> str:
         f'<p class="key">{html.escape(name)}</p>'
         f'<p><span class="stamp">{html.escape(STATUS_WORD[status])}</span></p>'
         f'<p class="value">{_value_html(item.value)}</p>'
-        f'<p class="why">{html.escape(item.reason)}</p>'
-        f'<p class="src">{html.escape(item.source)}</p>'
+        f'<p class="why">{html.escape(_use(name))}</p>'
         "</article>"
     )
 
@@ -392,8 +547,9 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
         cells = buckets.get(title) or []
         if not cells:
             continue
-        sections.append(f"<h2>{html.escape(title)}</h2><div class=\"grid\">{''.join(cells)}</div>")
-    steps = "".join(f"<li>{html.escape(line)}</li>" for line in WORKFLOW)
+        blurb = GROUP_USE.get(title, "")
+        intro = f'<p class="blurb">{html.escape(blurb)}</p>' if blurb else ""
+        sections.append(f"<h2>{html.escape(title)}</h2>{intro}<div class=\"grid\">{''.join(cells)}</div>")
     gap_lines = []
     covered = set()
     for name, item in card.fields.items():
@@ -402,7 +558,7 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
         covered.add(f"{name}: {item.reason}")
         gap_lines.append(
             f'<li class="hole"><span class="key">{html.escape(name)}</span> '
-            f"<strong>{html.escape(_label(name))}</strong> — {html.escape(item.reason)}</li>"
+            f"<strong>{html.escape(_label(name))}</strong>. {html.escape(_use(name))} Сейчас этого нет.</li>"
         )
     for line in card.holes:
         if line in covered or any(line.startswith(f"{name}: ") for name in card.fields):
@@ -412,10 +568,6 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
         holes = "<ul class=\"gaps\">" + "".join(gap_lines) + "</ul>"
     else:
         holes = "<p>Нет данных не осталось. Ниже только то, что прочитано.</p>"
-    journal = "".join(
-        f"<li>{html.escape(line['source'])}: {html.escape(line['result'])}. {html.escape(line['detail'])}</li>"
-        for line in card.journal
-    ) or "<li>Файлов маршрута не передавали.</li>"
     flight_cards = [block for block in (_flight_block(flight) for flight in card.flights) if block]
     flights = "<h2>Вылеты</h2><div class=\"grid\">" + "".join(flight_cards) + "</div>" if flight_cards else ""
     saved = f"<p>Файл отчёта: {html.escape(saved_path)}</p>" if saved_path else ""
@@ -428,12 +580,8 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
 <li class="confirmed"><span class="stamp">Подтверждено</span> прочитано</li>
 <li class="document"><span class="stamp">С шильдика</span> надпись на корпусе</li>
 </ul>
-<h2>С чего начать</h2>
-<ol class="steps">{steps}</ol>
 <h2>Нет данных</h2>
 {holes}
-<h2>Где искали маршрут</h2>
-<ol class="steps">{journal}</ol>
 {''.join(sections)}
 {flights}
 """
