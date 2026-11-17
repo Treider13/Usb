@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from drone_sweep.elrs_assemble import search_binding_sources
 from drone_sweep.elrs_binding import binding_phrase_to_uid, uid_bytes_to_hex
 from drone_sweep.elrs_rainbow import (
     build_and_save_table,
@@ -20,6 +21,13 @@ def test_sqlite_table_lookup(tmp_path: Path):
     assert phrase == "test"
     target = uid_bytes_to_hex(uid)
     assert store.get(target) == "test"
+
+
+def test_broken_sqlite_stays_in_the_problem_text(tmp_path: Path):
+    db = tmp_path / "broken.sqlite"
+    db.write_bytes(b"not a database")
+    _phrase, _used, problem = search_binding_sources([1, 2, 3, 4, 5, 6], None, db)
+    assert "не читается" in problem
 
 
 def test_build_and_save_uses_sqlite_for_large_file(tmp_path: Path, monkeypatch):
