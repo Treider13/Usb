@@ -1,7 +1,9 @@
 """Read an ExpressLRS Web UI without writing to it.
 
-The routes are the ones registered in ExpressLRS src/lib/WIFI/devWIFI.cpp:
-GET /config, GET /options.json, GET /hardware.json.
+The routes are the ones registered in ExpressLRS src/lib/WIFI/devWIFI.cpp.
+Current firmware: GET /config, GET /options.json, GET /hardware.json.
+ExpressLRS 3.0.0 also answers GET /target and GET /mode.json.
+/networks.json starts a Wi-Fi scan, so it is not called.
 /update, /reboot, /reset, /cw and /sethome change the device and are not called.
 """
 
@@ -13,8 +15,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
-READ_PATHS = ("/config", "/options.json", "/hardware.json")
-FORBIDDEN_PATHS = ("/update", "/reboot", "/reset", "/cw", "/sethome", "/connect", "/forceupdate")
+READ_PATHS = ("/config", "/options.json", "/hardware.json", "/target", "/mode.json")
+FORBIDDEN_PATHS = ("/update", "/reboot", "/reset", "/cw", "/sethome", "/connect", "/forceupdate", "/networks.json", "/access")
 
 
 class RadioAuthRequired(Exception):
@@ -99,6 +101,39 @@ def normalize_pages(pages: dict[str, Any]) -> dict[str, Any]:
             out["domain"] = options["reg_domain_low"]
     if isinstance(hardware, dict) and not out.get("model") and hardware.get("product_name"):
         out["model"] = hardware["product_name"]
+    target = pages.get("/target") or {}
+    mode = pages.get("/mode.json") or {}
+    if not isinstance(target, dict):
+        target = {}
+    if not isinstance(mode, dict):
+        mode = {}
+    if not out.get("version") and target.get("version"):
+        version = str(target["version"])
+        product = str(target.get("product_name") or mode.get("product_name") or "")
+        if "milelrs" in version.lower() or "milelrs" in product.lower():
+            out["version"] = version
+        else:
+            out["version"] = version if "expresslrs" in version.lower() else f"ExpressLRS {version}".strip()
+    if not out.get("model"):
+        out["model"] = target.get("product_name") or mode.get("product_name") or ""
+        if not out["model"]:
+            out.pop("model")
+    if target.get("target") and "target" not in out:
+        out["target"] = target["target"]
+    if "domain" not in out:
+        domain = target.get("reg_domain") or mode.get("reg_domain")
+        if domain not in (None, ""):
+            out["domain"] = domain
+    if "uid" not in out and isinstance(mode.get("uid"), list) and mode["uid"]:
+        out["uid"] = ",".join(str(part) for part in mode["uid"])
+    if mode.get("modelid") not in (None, "") and "model_id" not in out:
+        out["model_id"] = mode["modelid"]
+    if mode.get("lua_name"):
+        out["lua_name"] = mode["lua_name"]
+    if mode.get("mode"):
+        out["wifi_mode"] = mode["mode"]
+    if mode.get("uidtype"):
+        out["uid_type"] = mode["uidtype"]
     model = cfg.get("model")
     if isinstance(model, dict):
         for slot in model.values():

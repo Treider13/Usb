@@ -505,7 +505,7 @@ def _radio_fields(card: Card, inputs: Inputs) -> None:
         "vx_table": "таблица в странице приёмника, не параметр VTX полётника",
         "vx_bands": "таблица в странице приёмника, не параметр VTX полётника",
     }
-    for key in ("version", "model", "chip", "domain", "uid", "serial_protocol", "uart_baud", "rate_index", "rateinitialidx", "model_id", "tx_packet_rate", "target", "module_type", "git_commit"):
+    for key in ("version", "model", "chip", "domain", "uid", "serial_protocol", "uart_baud", "rate_index", "rateinitialidx", "model_id", "tx_packet_rate", "target", "module_type", "git_commit", "lua_name", "wifi_mode", "uid_type"):
         if key in reading.fields:
             card.put(f"radio_{key}", confirmed(reading.fields[key], "radio", rate_reasons.get(key, "")))
     if reading.firmware == "MILELRS":

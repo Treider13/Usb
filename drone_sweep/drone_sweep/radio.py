@@ -35,6 +35,9 @@ PUBLIC_KEYS = {
     "target",
     "module_type",
     "git_commit",
+    "lua_name",
+    "wifi_mode",
+    "uid_type",
 }
 
 

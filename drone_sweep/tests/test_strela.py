@@ -125,6 +125,41 @@ def test_elrs_tx_export_packet_rate_is_a_separate_field():
     assert card.fields["radio_swarm_id"].status == "not_applicable"
 
 
+def test_elrs_30_target_and_mode_fill_the_card_without_the_scan():
+    assert "/target" in READ_PATHS and "/mode.json" in READ_PATHS
+    assert "/networks.json" not in READ_PATHS
+    assert "/networks.json" in FORBIDDEN_PATHS
+    normalized = normalize_pages(
+        {
+            "/config": None,
+            "/target": {
+                "target": "unified_esp8285",
+                "version": "3.0.0",
+                "product_name": "Generic ESP8285",
+                "reg_domain": "ISM2G4",
+            },
+            "/mode.json": {
+                "ssid": "office",
+                "mode": "STA",
+                "modelid": 1,
+                "uid": [4, 5],
+                "uidtype": "Traditional",
+                "lua_name": "Generic",
+            },
+        }
+    )
+    assert normalized["version"] == "ExpressLRS 3.0.0"
+    assert normalized["target"] == "unified_esp8285"
+    assert normalized["domain"] == "ISM2G4"
+    assert normalized["model_id"] == 1
+    assert normalized["uid"] == "4,5"
+    assert normalized["wifi_mode"] == "STA"
+    assert "office" not in json.dumps(normalized)
+    card = assemble(Inputs(radio_json=normalized))
+    assert card.fields["radio_protocol"].value == "ExpressLRS"
+    assert card.fields["radio_wifi_mode"].value == "STA"
+
+
 def test_fetch_stops_on_401_and_never_calls_write_routes():
     seen = []
 
