@@ -99,15 +99,29 @@ def list_usb_ports(directory: Path | None = None) -> list[str]:
     return [device for device, _label in describe_ports()]
 
 
-def run_menu(input_lines: list[str], output: list[str] | None = None, port_opener=None) -> str:
-    """Numbered menu. `input_lines` are the operator's answers, in order."""
-    answers_box: list[str] = list(input_lines)
+def run_menu(
+    input_lines: list[str] | None = None,
+    output: list[str] | None = None,
+    port_opener=None,
+    echo: bool = False,
+) -> str:
+    """Numbered menu. A list of answers is for tests. A terminal asks one line at a time."""
+    answers_box: list[str] | None = None if input_lines is None else list(input_lines)
     written: list[str] = output if output is not None else []
 
     def say(text: str) -> None:
         written.append(text)
+        if echo:
+            print(text, flush=True)
 
     def ask(prompt: str) -> str:
+        if answers_box is None:
+            try:
+                answer = input(prompt + " ")
+            except EOFError:
+                answer = ""
+            written.append(prompt)
+            return answer.strip()
         say(prompt)
         if not answers_box:
             return ""
@@ -191,19 +205,36 @@ def guard_cli(command: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    try:
+        return _dispatch(args)
+    except KeyboardInterrupt:
+        print("Стрела остановлена.")
+        return 130
+
+
+def _dispatch(args: list[str]) -> int:
+    if args and args[0] == "serve":
+        from .webapp import ServeError, serve
+
+        try:
+            port = _serve_port(args)
+        except ValueError as exc:
+            print(exc)
+            return 2
+        try:
+            serve(port)
+        except ServeError as exc:
+            print(exc)
+            return 2
+        return 0
     if not args or args == ["menu"]:
-        print(run_menu(_stdin_lines()))
+        if sys.stdin.isatty():
+            run_menu(echo=True)
+        else:
+            print(run_menu(_stdin_lines()))
         return 0
     if args[0] == "explain":
         print(explain_text())
-        return 0
-    if args[0] == "serve":
-        from .webapp import serve
-
-        port = 8765
-        if len(args) >= 3 and args[1] == "--port":
-            port = int(args[2])
-        serve(port)
         return 0
     if args[0] == "assemble":
         from .__main__ import main as assemble_main
@@ -219,6 +250,25 @@ def main(argv: list[str] | None = None) -> int:
     print(explain_text())
     print("Команды: strela, strela explain, strela serve --port 8765, strela assemble ...")
     return 1
+
+
+def _serve_port(args: list[str]) -> int:
+    if len(args) == 1:
+        return 8765
+    raw = ""
+    if len(args) == 2 and args[1].startswith("--port="):
+        raw = args[1].split("=", 1)[1]
+    elif len(args) == 3 and args[1] == "--port":
+        raw = args[2]
+    else:
+        raise ValueError("Команда: strela serve --port 8765")
+    try:
+        port = int(raw)
+    except ValueError:
+        raise ValueError(f"Номер порта должен быть числом: {raw}") from None
+    if not 0 <= port <= 65535:
+        raise ValueError(f"Номер порта вне диапазона: {port}")
+    return port
 
 
 def _stdin_lines() -> list[str]:

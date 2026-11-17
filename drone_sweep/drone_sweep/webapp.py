@@ -50,7 +50,7 @@ def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
 <form class="connect" method="post" action="/usb">
 <select name="port" aria-label="USB-порт">{options}</select>
 <span class="baud">115200</span>
-<input name="out" value="strela-out" aria-label="Папка отчёта" placeholder="папка отчёта">
+<label class="folder">Папка <input name="out" value="strela-out" aria-label="Папка отчёта"></label>
 <button type="submit">Считать</button>
 </form>
 """
@@ -83,6 +83,7 @@ def form_page() -> bytes:
         for name, title, help_text in FORM_FIELDS
     )
     inner = f"""
+<header class="topbar"><a class="brand" href="/">Стрела</a></header>
 <h1>Собрать карточку</h1>
 <p class="lede">Впишите пути к файлам на этом компьютере. Пустой путь пропускается. Программа ничего не пишет в полётник.</p>
 <form method="post" action="/assemble">
@@ -97,6 +98,7 @@ def form_page() -> bytes:
 def explain_page() -> bytes:
     steps = "".join(f"<li>{html.escape(step)}</li>" for step in WORKFLOW)
     inner = f"""
+<header class="topbar"><a class="brand" href="/">Стрела</a></header>
 <h1>Подсказки</h1>
 <p class="lede">Идите по шагам. Если клетка красная, прочитайте причину и сделайте только то, что написано рядом.</p>
 <ol class="steps">{steps}</ol>
@@ -162,7 +164,18 @@ class StrelaHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class ServeError(Exception):
+    pass
+
+
 def serve(port: int = 8765) -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", port), StrelaHandler)
-    print(f"{APP_NAME}: http://127.0.0.1:{port}")
-    server.serve_forever()
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), StrelaHandler)
+    except OSError as exc:
+        raise ServeError(f"Адрес 127.0.0.1:{port} занят ({exc}).") from exc
+    print(f"{APP_NAME}: http://127.0.0.1:{port}", flush=True)
+    print("Остановка: Ctrl+C", flush=True)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()

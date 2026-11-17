@@ -334,7 +334,23 @@ def _classify(port: QuietPort) -> tuple[str, dict | None]:
         variant = msp_variant_name(reply)
         if variant is not None:
             return variant, None
+    # A board left in the CLI stays silent for MSP. `version` is a read.
+    port.write(b"version\n")
+    kind = family_in_text(port.read().decode("latin1", errors="replace"))
+    if kind is not None:
+        return kind, None
     return "unknown", None
+
+
+def family_in_text(text: str) -> str | None:
+    lowered = text.lower()
+    if "betaflight" in lowered:
+        return "betaflight"
+    if "cleanflight" in lowered:
+        return "cleanflight"
+    if "inav" in lowered:
+        return "inav"
+    return None
 
 
 def describe_ports() -> list[tuple[str, str]]:

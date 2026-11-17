@@ -51,9 +51,17 @@ body {
 }
 .brand {
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--primary-500);
+  text-decoration: none;
+}
+label.folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--quiet);
+  font-size: 14px;
 }
 .connect {
   display: flex;

@@ -165,6 +165,15 @@ def _variant_frame(token: bytes) -> bytes:
     return bytes([ord("$"), ord("M"), ord(">"), len(token), MSP_FC_VARIANT]) + token + bytes([checksum])
 
 
+def test_version_text_names_a_board_left_in_the_cli():
+    from drone_sweep.usb_read import family_in_text
+
+    assert family_in_text("# Betaflight / STM32F405 4.5.0\r\n#\r\n") == "betaflight"
+    assert family_in_text("INAV/MATEKF405 7.0.0\r\n#\r\n") == "inav"
+    assert family_in_text("Cleanflight / STM32F303\r\n") == "cleanflight"
+    assert family_in_text("Hello\r\n#\r\n") is None
+
+
 def test_msp_variant_names_the_three_flight_stacks():
     assert msp_variant_name(_variant_frame(b"BTFL")) == "betaflight"
     assert msp_variant_name(_variant_frame(b"INAV")) == "inav"

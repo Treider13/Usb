@@ -42,6 +42,35 @@ def test_check_command_refuses_save():
     assert main(["check-command", "dump all"]) == 0
 
 
+def test_serve_never_reads_stdin(monkeypatch):
+    seen = {}
+
+    def fake_serve(port):
+        seen["port"] = port
+
+    monkeypatch.setattr("drone_sweep.webapp.serve", fake_serve)
+
+    def fail_stdin():
+        raise AssertionError("serve прочитал stdin")
+
+    monkeypatch.setattr("drone_sweep.menu._stdin_lines", fail_stdin)
+    assert main(["serve", "--port", "8765"]) == 0
+    assert seen["port"] == 8765
+    assert main(["serve", "--port=9000"]) == 0
+    assert seen["port"] == 9000
+    assert main(["serve", "--port", "nope"]) == 2
+
+
+def test_ctrl_c_stops_without_a_traceback(monkeypatch, capsys):
+    def interrupt():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("drone_sweep.menu._stdin_lines", interrupt)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert main([]) == 130
+    assert capsys.readouterr().out.strip() == "Стрела остановлена."
+
+
 def test_web_menu_and_post(tmp_path: Path):
     dump = tmp_path / "dump.txt"
     dump.write_text(DUMP, encoding="utf-8")
