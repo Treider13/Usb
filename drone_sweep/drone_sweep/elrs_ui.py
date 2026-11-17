@@ -110,7 +110,7 @@ def _resolve_flash_input(
     raw = _flash_bytes(form, uploads)
     if raw is not None:
         return raw, "", ""
-    return None, "", "выберите файл или нажмите «Считать с дрона» внизу"
+    return None, "", "выберите файл .bin / Intel HEX или укажите путь"
 
 
 def _phrase_panel(phrase: str, *, extra: str = "") -> str:
@@ -120,7 +120,9 @@ def _phrase_panel(phrase: str, *, extra: str = "") -> str:
         f"<p class='value-big'><code>{html.escape(phrase)}</code></p>"
         f"<p class='help'>MD5 define (мертвый хэш в прошивке): <code>{html.escape(md5_full)}</code></p>"
         f"{extra}"
-        "<p class='help'>Пароль Wi‑Fi для этого не нужен. В отчёт Стрелы текст фразы "
+        "<p class='help'>Это binding phrase, не пароль страницы <code>http://10.0.0.1</code>. "
+        "Пароль WebUI CIRCL берёт из поля <code>wifi-password</code> в том же файле, если оно там есть. "
+        "В отчёт Стрелы текст фразы "
         "по умолчанию не пишется — только статус <code>radio_binding_phrase_crack</code>.</p>"
         "</article>"
     )
