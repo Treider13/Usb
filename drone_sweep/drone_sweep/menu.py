@@ -240,6 +240,10 @@ def _dispatch(args: list[str]) -> int:
         from .__main__ import main as assemble_main
 
         return assemble_main(args)
+    if args[0] == "elrs":
+        from .elrs_cli import main as elrs_main
+
+        return elrs_main(args[1:])
     if args[0] == "check-command":
         try:
             print(guard_cli(" ".join(args[1:])))
@@ -248,7 +252,10 @@ def _dispatch(args: list[str]) -> int:
             return 2
         return 0
     print(explain_text())
-    print("Команды: strela, strela explain, strela serve --port 8765, strela assemble ...")
+    print(
+        "Команды: strela, strela explain, strela serve --port 8765, strela assemble ..., "
+        "strela elrs uid|crack|lookup|build-rainbow|build-memory ..."
+    )
     return 1
 
 
