@@ -24,6 +24,13 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    if not args.quiet and setup_is_ready(args.data_dir):
-        print("Готово. Запуск: strela serve --port 8765")
+    if not args.quiet:
+        if setup_is_ready(args.data_dir):
+            print("Готово. Запуск: strela serve --port 8765")
+        else:
+            print(
+                "Частично: снова выполните strela setup (elrs_rainbow и rockyou долго; Ctrl+C — можно продолжить позже).",
+                file=sys.stderr,
+            )
+            return 1
     return 0

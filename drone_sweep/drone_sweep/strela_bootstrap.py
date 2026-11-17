@@ -179,6 +179,8 @@ def run_setup(
 ) -> SetupResult:
     root = resolve_data_dir(data_dir)
     root.mkdir(parents=True, exist_ok=True)
+    (root / "wordlists").mkdir(parents=True, exist_ok=True)
+    (root / "tables").mkdir(parents=True, exist_ok=True)
     manifest = load_manifest(root) or {"version": MANIFEST_VERSION, "data_dir": str(root)}
     sources: dict[str, dict[str, str]] = dict(_sources(manifest))
     created: list[str] = []
@@ -209,6 +211,10 @@ def run_setup(
             if preset != "rockyou":
                 ready_wordlists.append(wordlist_path)
         except OSError as exc:
+            failed.append(f"{preset}: {exc}")
+            if not quiet:
+                print(f"Пропуск {preset}: {exc}", file=sys.stderr)
+        except ValueError as exc:
             failed.append(f"{preset}: {exc}")
             if not quiet:
                 print(f"Пропуск {preset}: {exc}", file=sys.stderr)
