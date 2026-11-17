@@ -227,15 +227,24 @@ def _dict_source_select() -> str:
     return f'<label>Словари <select name="dict_source">{options}</select></label>'
 
 
-def _drone_port_select() -> str:
+def _drone_port_select(*, required_hint: str = "") -> str:
     choices = _ports(None)
     if not choices:
         return "<p class='help'>USB не виден — подключите полётник и обновите страницу.</p>"
-    options = '<option value="">— не читать USB —</option>' + "".join(
+    options = '<option value="">— только Wi‑Fi / файл —</option>' + "".join(
         f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
         for device, label in choices
     )
-    return f'<label>USB полётник <select name="drone_port">{options}</select></label>'
+    hint = f" {required_hint}" if required_hint else ""
+    return f'<label>USB полётник{hint} <select name="drone_port">{options}</select></label>'
+
+
+def _drone_wifi_fields(*, default_base: bool = False) -> str:
+    base_val = ' value="http://10.0.0.1"' if default_base else ""
+    return f"""
+<label>Адрес Wi‑Fi модуля (приёмник под питанием) <input name="radio_base"{base_val} placeholder="http://10.0.0.1"></label>
+<label>Пароль Wi‑Fi WebUI <input name="wifi_password" type="password" placeholder="expresslrs" autocomplete="off"></label>
+"""
 
 
 def crack_page(result: str = "", prefill_uid: str = "") -> bytes:
@@ -263,8 +272,7 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="read_drone">
 {_drone_port_select()}
-<label>Адрес модуля <input name="radio_base" value="http://10.0.0.1"></label>
-<label>Пароль Wi‑Fi WebUI <input name="wifi_password" type="password" placeholder="expresslrs" autocomplete="off"></label>
+{_drone_wifi_fields(default_base=True)}
 {_dict_source_select()}
 <p><button type="submit">Считать и подобрать фразу</button></p>
 </form>
@@ -274,6 +282,8 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="phrase_from_flash">
 {_dict_source_select()}
+{_drone_port_select(required_hint="")}
+{_drone_wifi_fields(default_base=False)}
 <label>Образ с ПК <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
 <span class="help">или путь <input name="flash_path"></span>
 <label>Словарь с ПК <input type="file" name="binding_wordlist_file" accept=".txt,.lst"></label>
@@ -294,11 +304,14 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 </article>
 <article class="panel">
 <h2>Разбор flash / HEX</h2>
+<p class="help">Файл .bin / Intel HEX <em>или</em> чтение с подключённого дрона (USB полётник + Wi‑Fi приёмника).</p>
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="dump">
+{_drone_port_select(required_hint=" — с дрона")}
+{_drone_wifi_fields(default_base=False)}
 <label>Файл с ПК <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
 <span class="help">или путь <input name="flash_path"></span>
-<p><button type="submit">Извлечь UID и Wi‑Fi (без пароля)</button></p>
+<p><button type="submit">Прочитать с дрона / разобрать файл</button></p>
 </form>
 </article>
 <article class="panel">

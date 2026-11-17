@@ -9,7 +9,7 @@ from typing import Mapping
 
 from .assemble import Inputs, assemble
 from .dump_elrs import public_extraction_summary
-from .elrs_drone_read import read_drone_elrs_html
+from .elrs_drone_read import capture_drone_flash_bytes, read_drone_elrs_html
 from .elrs_assemble import search_binding_sources
 from .elrs_binding import binding_phrase_to_uid, parse_uid_field, uid_bytes_to_hex
 from .elrs_rainbow import build_memory_table, save_memory_table
@@ -131,13 +131,25 @@ def handle_elrs_form(
         ), dec
     if action in {"dump", "phrase_from_flash"}:
         raw = _flash_bytes(form, uploads)
+        drone_line = ""
         if raw is None:
-            return False, "<p class='hole'>Выберите файл .bin или Intel HEX с компьютера (или укажите путь).</p>", ""
+            raw, drone_line, err = capture_drone_flash_bytes(form)
+            if raw is None:
+                if err and "пароль" in err.lower():
+                    return (
+                        False,
+                        "<p class='hole'>Модуль просит пароль Wi‑Fi (часто <code>expresslrs</code>). Введите его в форме ниже.</p>",
+                        "",
+                    )
+                hint = html.escape(err) if err else "выберите файл, USB-порт или Wi‑Fi модуля"
+                return False, f"<p class='hole'>{hint}</p>", ""
         summary = public_extraction_summary(raw)
         uid_text = _first_uid_from_summary(summary)
         text = html.escape(json.dumps(summary, ensure_ascii=False, indent=2))
+        drone_html = f"<p>{html.escape(drone_line)}</p>" if drone_line else ""
         dump_block = (
-            "<article class='panel'><h2>Из flash (dump_elrs)</h2>"
+            drone_html
+            + "<article class='panel'><h2>Из flash (dump_elrs)</h2>"
             f"<pre>{text}</pre>"
             "<p class='help'>Пароль Wi‑Fi в карточку не попадает — только флаг wifi_password_present.</p>"
             "</article>"

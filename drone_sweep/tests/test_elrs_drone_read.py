@@ -1,5 +1,13 @@
 from drone_sweep.elrs_binding import binding_phrase_to_uid
+from drone_sweep.elrs_drone_read import synthesize_flash_bytes
+from drone_sweep.dump_elrs import public_extraction_summary
 from drone_sweep.strela_bootstrap import search_binding_installed
+
+
+def test_synthesize_flash_exposes_uid_for_dump():
+    blob = synthesize_flash_bytes({"uid": "79,4,253,130,33,85", "version": "ExpressLRS"})
+    summary = public_extraction_summary(blob)
+    assert summary["extracted"][0]["uid"] == "79,4,253,130,33,85"
 
 
 def test_search_binding_installed_uses_passhelp(tmp_path, monkeypatch):

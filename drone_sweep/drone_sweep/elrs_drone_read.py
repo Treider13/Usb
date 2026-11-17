@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import html
-from pathlib import Path
+import json
+from dataclasses import dataclass
 
 from .assemble import Inputs, assemble
 from .elrs_assemble import BINDING_UID_PROTOCOLS
@@ -34,18 +35,31 @@ def _fetch_radio(base: str, wifi_password: str) -> dict:
         raise
 
 
-def read_drone_elrs_html(
-    form: dict[str, str],
-    *,
-    source_id: str = "all",
-) -> tuple[bool, str, str]:
-    """USB и/или WebUI модуля → UID → binding phrase. Возврат как handle_elrs_form."""
+def synthesize_flash_bytes(radio_json: dict) -> bytes:
+    """JSON с модуля как бинарник для CIRCL dump_elrs (ищет «{» в потоке)."""
+    payload = dict(radio_json)
+    if isinstance(payload.get("uid"), str) and "," in str(payload["uid"]):
+        payload["uid"] = [int(part) for part in str(payload["uid"]).split(",")]
+    return b"\xff\xff" + json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+@dataclass
+class DroneCapture:
+    flash_bytes: bytes | None = None
+    dump_text: str | None = None
+    radio_json: dict | None = None
+    notes: str = ""
+    error: str = ""
+
+
+def capture_drone(form: dict[str, str]) -> DroneCapture:
     port = form.get("drone_port", "").strip()
-    base = form.get("radio_base", "http://10.0.0.1").strip()
+    base = (form.get("radio_base") or "").strip()
     wifi_password = form.get("wifi_password", "").strip()
-    blocks: list[str] = []
-    dump_text = None
-    radio_json = None
+    notes: list[str] = []
+    dump_text: str | None = None
+    radio_json: dict | None = None
+    flash_bytes: bytes | None = None
 
     if port:
         try:
@@ -54,32 +68,63 @@ def read_drone_elrs_html(
                 wants={"dump": True, "msp": True, "params": False, "bin": False},
             )
             dump_text = captured.dump_text
-            blocks.append(
-                "<p>Полётник по USB: дамп снят"
-                + (f", expresslrs в настройках" if dump_text and "expresslrs" in dump_text.lower() else "")
-                + ".</p>"
-            )
+            notes.append("Полётник по USB: дамп снят.")
         except (OSError, ReadOnlyError, ValueError) as exc:
-            return False, f"<p class='hole'>USB: {html.escape(str(exc))}</p>", ""
+            return DroneCapture(error=str(exc))
 
     if base:
         try:
             pages = _fetch_radio(base, wifi_password)
             radio_json = normalize_pages(pages)
-            blocks.append("<p>Модуль по Wi‑Fi: страница прочитана.</p>")
+            flash_bytes = synthesize_flash_bytes(radio_json)
+            notes.append("Модуль по Wi‑Fi: конфиг прочитан.")
         except RadioAuthRequired:
+            return DroneCapture(notes=" ".join(notes), error="нужен пароль Wi‑Fi WebUI (часто expresslrs)")
+        except OSError as exc:
+            return DroneCapture(notes=" ".join(notes), error=str(exc))
+
+    if dump_text is None and radio_json is None:
+        if not port and not base:
+            return DroneCapture(error="выберите USB-порт и/или укажите адрес Wi‑Fi модуля")
+        return DroneCapture(error="чтение не дало данных")
+
+    return DroneCapture(
+        flash_bytes=flash_bytes,
+        dump_text=dump_text,
+        radio_json=radio_json,
+        notes=" ".join(notes),
+    )
+
+
+def capture_drone_flash_bytes(form: dict[str, str]) -> tuple[bytes | None, str, str]:
+    cap = capture_drone(form)
+    if cap.error and cap.flash_bytes is None:
+        return None, cap.notes, cap.error
+    if cap.flash_bytes is None and cap.dump_text and "expresslrs" not in (cap.dump_text or "").lower():
+        return None, cap.notes, "в USB-дампе нет expresslrs — включите Wi‑Fi на приёмнике или загрузите .bin"
+    return cap.flash_bytes, cap.notes, cap.error
+
+
+def read_drone_elrs_html(
+    form: dict[str, str],
+    *,
+    source_id: str = "all",
+) -> tuple[bool, str, str]:
+    """USB и/или WebUI модуля → UID → binding phrase."""
+    cap = capture_drone(form)
+    blocks: list[str] = []
+    if cap.notes:
+        blocks.append(f"<p>{html.escape(cap.notes)}</p>")
+    if cap.error and cap.radio_json is None and not cap.dump_text:
+        if "пароль" in cap.error.lower():
             return (
                 False,
                 "<p class='hole'>Модуль просит пароль Wi‑Fi (часто <code>expresslrs</code>). Введите в поле ниже.</p>",
                 "",
             )
-        except OSError as exc:
-            return False, f"<p class='hole'>Wi‑Fi: {html.escape(str(exc))}</p>", ""
+        return False, f"<p class='hole'>{html.escape(cap.error)}</p>", ""
 
-    if dump_text is None and radio_json is None:
-        return False, "<p class='hole'>Укажите USB-порт полётника и/или адрес Wi‑Fi модуля.</p>", ""
-
-    card = assemble(Inputs(dump_text=dump_text, radio_json=radio_json))
+    card = assemble(Inputs(dump_text=cap.dump_text, radio_json=cap.radio_json))
     protocol = card.fields.get("radio_protocol")
     proto = str(protocol.value) if protocol and protocol.status == "confirmed" else None
     if proto and proto not in BINDING_UID_PROTOCOLS:
@@ -88,8 +133,7 @@ def read_drone_elrs_html(
     uid_field = card.fields.get("radio_uid")
     if uid_field is None or uid_field.status != "confirmed":
         blocks.append(
-            "<p class='hole'>В чтении нет UID. Проверьте питание приёмника, Wi‑Fi сеть ExpressLRS RX "
-            "или снимите flash.</p>"
+            "<p class='hole'>В чтении нет UID. Включите Wi‑Fi ExpressLRS RX, задайте пароль WebUI или загрузите .bin.</p>"
         )
         return False, "".join(blocks), ""
 
