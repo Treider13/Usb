@@ -167,9 +167,6 @@ def crack_page(result: str = "") -> bytes:
     result_block = f'<section class="report">{result}</section>' if result else ""
     inner = f"""
 <h1>Подбор</h1>
-<p class="lede">Как <a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL Drone-Forensic elrs/</a>:
-UID из binding phrase, JSON из flash, подбор фразы. Работает для <strong>ExpressLRS</strong> и <strong>MILELRS</strong>.
-<strong>OrangeRX</strong> — протокол DSM, сюда не подходит.</p>
 {result_block}
 <div class="cards">
 <article class="panel">
@@ -234,7 +231,7 @@ def explain_page() -> bytes:
 <p class="lede">Идите по шагам. Если клетка красная, прочитайте причину и сделайте только то, что написано рядом.</p>
 <ol class="steps">{steps}</ol>
 <p>Если страница приёмника просит пароль Wi‑Fi, введите его сами один раз — это не вкладка «Подбор».</p>
-<p>Binding phrase ExpressLRS/MILELRS — вкладка <a href="/crack">Подбор</a> (как CIRCL elrs).</p>
+<p>Binding phrase ExpressLRS и MILELRS — вкладка <a href="/crack">Подбор</a>.</p>
 """
     return page("Подсказки", inner, connect=connect_bar(), current="/explain").encode("utf-8")
 

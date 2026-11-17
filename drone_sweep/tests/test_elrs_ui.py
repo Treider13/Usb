@@ -7,8 +7,8 @@ def test_crack_page_has_nav_tab():
     assert "Подбор" in body
     assert 'href="/crack"' in body
     assert "aria-current" in body
-    assert "CIRCL" in body or "circl" in body.lower()
-    assert "OrangeRX" in body
+    assert "circl" not in body.lower()
+    assert "github.com" not in body
 
 
 def test_handle_uid_action():
@@ -16,6 +16,7 @@ def test_handle_uid_action():
     assert ok
     assert "4F04FD822155" in fragment
     assert "79,4,253,130,33,85" in fragment
+    assert "circl" not in fragment.lower()
 
 
 def test_handle_crack_missing_wordlist():
