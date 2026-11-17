@@ -62,13 +62,14 @@ class Card:
     holes: list[str] = field(default_factory=list)
     hints: list[str] = field(default_factory=list)
     files: list[dict[str, str]] = field(default_factory=list)
+    commands: list[str] = field(default_factory=list)
     raw_banner: str = ""
 
     def put(self, name: str, item: Item) -> None:
         self.fields[name] = item
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "family": self.family,
             "raw_banner": self.raw_banner,
             "fields": {key: item.to_dict() for key, item in self.fields.items()},
@@ -78,3 +79,6 @@ class Card:
             "hints": self.hints,
             "files": self.files,
         }
+        if self.commands:
+            data["commands"] = self.commands
+        return data

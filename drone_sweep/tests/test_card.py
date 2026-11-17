@@ -367,7 +367,13 @@ def test_cli_rejects_writes():
     with pytest.raises(ReadOnlyError):
         assert_readonly_cli("serialpassthrough 1 420000")
     assert assert_readonly_cli("dump all") == "dump all"
+    assert assert_readonly_cli("diff all") == "diff all"
+    assert assert_readonly_cli("wp") == "wp"
     assert assert_readonly_cli("version") == "version"
+    with pytest.raises(ReadOnlyError):
+        assert_readonly_cli("wp load")
+    with pytest.raises(ReadOnlyError):
+        assert_readonly_cli("wp save")
 
 
 def test_msp_boxnames_roundtrip():

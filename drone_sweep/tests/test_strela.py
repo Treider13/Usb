@@ -9,7 +9,7 @@ import pytest
 
 from drone_sweep.assemble import Inputs, assemble
 from drone_sweep.elrs_http import FORBIDDEN_PATHS, READ_PATHS, RadioAuthRequired, fetch_pages, normalize_pages
-from drone_sweep.menu import main, run_menu
+from drone_sweep.menu import QUESTIONS, main, run_menu
 from drone_sweep.webapp import StrelaHandler
 from tests.test_card import BOXES, DUMP
 
@@ -20,7 +20,8 @@ def test_menu_builds_the_b162_card(tmp_path: Path):
     boxes = tmp_path / "boxes.txt"
     boxes.write_text(BOXES, encoding="utf-8")
     out = tmp_path / "out"
-    lines = ["1", str(dump), str(boxes), *([""] * 13), str(out), "5"]
+    blanks = [""] * (len(QUESTIONS) - 3)
+    lines = ["1", str(dump), str(boxes), *blanks, str(out), "5"]
     text = run_menu(lines)
     assert "Стрела" in text
     assert "Отчёт:" in text

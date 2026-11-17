@@ -61,8 +61,17 @@ def drain(connection, kinds: tuple[str, ...], rounds: int = 3) -> list:
     return found
 
 
-def read_dataflash(connection, directory: Path | None) -> tuple[list[dict], Path | None, str]:
-    """List the logs, then save the newest non-empty one. The board must be disarmed; Strela does not disarm it."""
+def read_dataflash(
+    connection,
+    directory: Path | None,
+    log_id: int | None = None,
+) -> tuple[list[dict], Path | None, str]:
+    """List the logs, then save one of them.
+
+    Without log_id the newest non-empty log is saved, which is what a single
+    «Считать» used to do. With log_id that id is saved and a newer log is left
+    on the board. The board must be disarmed; Strela does not disarm it.
+    """
     gcs_heartbeat(connection)
     texts: list[str] = []
     entries: list = []
@@ -95,9 +104,9 @@ def read_dataflash(connection, directory: Path | None) -> tuple[list[dict], Path
         return rows, None, "плата не прислала LOG_ENTRY. Журнал не скачан."
     if entries[-1].num_logs == 0:
         return rows, None, "на плате нет журнала .BIN"
-    chosen = _newest_with_bytes(entries)
+    chosen, why = _choose(entries, log_id)
     if chosen is None:
-        return rows, None, "журналы на плате есть, но размер каждого 0 байт. Файл не записан."
+        return rows, None, why or "журнал не выбран"
     if directory is None:
         return rows, None, f"на плате журнал {chosen.id}, {chosen.size} байт. Папка не задана, файл не записан."
     directory.mkdir(parents=True, exist_ok=True)
@@ -169,6 +178,22 @@ def _list_complete(entries: list) -> bool:
         return True
     ids = {int(entry.id) for entry in entries}
     return len(ids) >= count
+
+
+def _choose(entries: list, log_id: int | None):
+    if log_id is None:
+        chosen = _newest_with_bytes(entries)
+        if chosen is None:
+            return None, "журналы на плате есть, но размер каждого 0 байт. Файл не записан."
+        return chosen, ""
+    for entry in entries:
+        if int(entry.id) != int(log_id):
+            continue
+        if int(entry.size) <= 0:
+            return None, f"журнал {int(log_id)} в списке, размер 0 байт. Файл не записан."
+        return entry, ""
+    listed = ", ".join(str(int(entry.id)) for entry in entries) or "пусто"
+    return None, f"журнала {int(log_id)} нет в списке ({listed}). Файл не записан."
 
 
 def _newest_with_bytes(entries: list):

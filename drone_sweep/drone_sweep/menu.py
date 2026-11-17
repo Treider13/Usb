@@ -33,6 +33,8 @@ QUESTIONS = (
     ("nameplate_radio", "Шильдик радиомодуля"),
     ("nameplate_gimbal", "Шильдик подвеса"),
     ("stm32", "Файл журнала STM32_Programmer_CLI или st-info. Enter — пропустить"),
+    ("diff", "Файл ответа diff all. Enter — пропустить"),
+    ("wp", "Файл ответа команды wp INAV. Enter — пропустить"),
     ("out", "Папка отчёта"),
 )
 
@@ -69,6 +71,8 @@ def inputs_from_answers(answers: dict[str, str]) -> Inputs:
         radio_image=image_path.read_bytes() if image_path else None,
         nameplates=plates,
         stm32_text=text_of(path_of("stm32")),
+        diff_text=text_of(path_of("diff")),
+        wp_text=text_of(path_of("wp")),
         auth_declined=answers.get("auth_declined", "").strip() in {"1", "yes", "да"},
         binding_wordlist=path_of("binding_wordlist"),
         binding_memory_table=path_of("binding_memory_table"),
@@ -77,7 +81,14 @@ def inputs_from_answers(answers: dict[str, str]) -> Inputs:
 
 def write_report(card, folder: Path) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "card.json").write_text(json.dumps(card.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = card.to_dict()
+    (folder / "card.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    evidence = {
+        "family": card.family,
+        "commands": card.commands,
+        "files": card.files,
+    }
+    (folder / "evidence.json").write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
     page = folder / "report.html"
     page.write_text(render_html(card), encoding="utf-8")
     return page
@@ -153,7 +164,7 @@ def run_menu(
         elif choice == "3":
             ports = list_usb_ports()
             say("Порты: " + (", ".join(ports) if ports else "не найдены. Подключите полётник кабелем USB и откройте меню снова."))
-            say("Кнопка чтения сама отличает Betaflight, INAV, Cleanflight и ArduPilot. Сначала MSP или список параметров, для полётника с CLI затем dump all. У ArduPilot запрашиваются версия, параметры и последний журнал .BIN. LOG_ERASE не отправляется, взведение не снимается. У Betaflight после дампа уходит exit noreboot: голый exit в cli.c перезагружает плату. У INAV exit вызывает cliReboot, поэтому не отправляется. set, save и serialpassthrough не отправляются.")
+            say("Кнопка чтения сама отличает Betaflight, INAV, Cleanflight и ArduPilot. Сначала MSP или список параметров, для полётника с CLI затем dump all и diff all. У INAV затем wp. У ArduPilot запрашиваются версия, параметры и один журнал .BIN. Пустой номер — последний непустой журнал. LOG_ERASE не отправляется, взведение не снимается. У Betaflight после дампа уходит exit noreboot: голый exit в cli.c перезагружает плату. У INAV exit вызывает cliReboot, поэтому не отправляется. set, save и serialpassthrough не отправляются.")
             picked = ask("Путь порта. Enter — не читать.").strip()
             if not picked:
                 continue
@@ -161,8 +172,13 @@ def run_menu(
             if not folder:
                 say("Папка отчёта обязательна. Порт не открывался.")
                 continue
+            raw_log = ask("Номер журнала ArduPilot. Enter — последний непустой.").strip()
+            log_id, log_error = _log_id(raw_log)
+            if log_error:
+                say(log_error)
+                continue
             try:
-                card_inputs = read_usb(picked, port_opener=port_opener, log_dir=folder)
+                card_inputs = read_usb(picked, port_opener=port_opener, log_dir=folder, log_id=log_id)
             except (OSError, ReadOnlyError, ValueError) as exc:
                 say(f"Порт не ответил: {exc}. Карточка из пустого ответа не собрана.")
                 continue
@@ -244,6 +260,8 @@ def _dispatch(args: list[str]) -> int:
         from .__main__ import main as assemble_main
 
         return assemble_main(args)
+    if args[0] == "diff":
+        return _diff_cards(args[1:])
     if args[0] == "elrs":
         from .elrs_cli import main as elrs_main
 
@@ -258,9 +276,34 @@ def _dispatch(args: list[str]) -> int:
     print(explain_text())
     print(
         "Команды: strela, strela explain, strela serve --port 8765, strela assemble ..., "
+        "strela diff a.json b.json, "
         "strela elrs uid|dump|crack|lookup|lookup-memory|build-rainbow|build-memory ..."
     )
     return 1
+
+
+def _log_id(text: str) -> tuple[int | None, str]:
+    if not text:
+        return None, ""
+    if not text.isdigit() or int(text) <= 0:
+        return None, f"Номер журнала должен быть целым больше нуля: {text}. Порт не открывался."
+    return int(text), ""
+
+
+def _diff_cards(args: list[str]) -> int:
+    if len(args) != 2:
+        print("Команда: strela diff левая.json правая.json")
+        return 2
+    from .compare import diff_cards, render_diff
+
+    try:
+        left = json.loads(Path(args[0]).read_text(encoding="utf-8"))
+        right = json.loads(Path(args[1]).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Карточка не прочитана: {exc}")
+        return 2
+    print(render_diff(diff_cards(left, right)))
+    return 0
 
 
 def _serve_port(args: list[str]) -> int:
