@@ -7,38 +7,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from .redact import redact_json, redact_text_blob
+from .redact import redact_json, redact_text_blob, _secret_name
 
 
 _FIRMWARES = ("MILELRS", "ExpressLRS", "mLRS")
-
-# Printed by the MILELRS / ExpressLRS pages we accept into the card.
-PUBLIC_KEYS = {
-    "version",
-    "firmware",
-    "model",
-    "chip",
-    "domain",
-    "uid",
-    "serial_protocol",
-    "uart_baud",
-    "rate_index",
-    "rateinitialidx",
-    "model_id",
-    "custom_freq",
-    "binding_rate",
-    "swarm_id",
-    "vx_table",
-    "vx_bands",
-    "modulation_mode",
-    "tx_packet_rate",
-    "target",
-    "module_type",
-    "git_commit",
-    "lua_name",
-    "wifi_mode",
-    "uid_type",
-}
 
 
 @dataclass
@@ -69,8 +41,10 @@ def _flatten(node: Any, prefix: str = "") -> dict[str, str]:
             if isinstance(value, (dict, list)):
                 found.update(_flatten(value, child))
             elif value is not None:
-                found[name.lower()] = str(value)
-                found[child.lower()] = str(value)
+                text = str(value)
+                full = child.lower().replace("-", "_")
+                found[full] = text
+                found.setdefault(name.lower().replace("-", "_"), text)
     elif isinstance(node, list):
         for index, value in enumerate(node):
             found.update(_flatten(value, f"{prefix}[{index}]"))
@@ -82,7 +56,7 @@ def parse_radio_json(payload: Any) -> RadioReading:
     flat = _flatten(clean)
     blob = json.dumps(clean, ensure_ascii=False).encode("utf-8")
     firmware = _firmware_of(json.dumps(payload, ensure_ascii=False))
-    kept = {key: value for key, value in flat.items() if key.split(".")[-1] in PUBLIC_KEYS}
+    kept = {key: value for key, value in flat.items() if not _secret_name(key.split(".")[-1])}
     return RadioReading(firmware, kept, removed, blob)
 
 
@@ -102,8 +76,10 @@ def parse_radio_image(blob: bytes) -> RadioReading:
     fields: dict[str, str] = {}
     for match in re.finditer(r"(?im)^([A-Za-z0-9_\-]{2,40})\s*[:=]\s*(\S.*?)\s*$", text):
         key = match.group(1).lower().replace("-", "_")
-        if key in PUBLIC_KEYS:
-            fields[key] = match.group(2).strip()
+        value = match.group(2).strip()
+        if _secret_name(key) or value == "[removed]":
+            continue
+        fields[key] = value
     version = re.search(r"MILELRS_v\d+|ExpressLRS[^\s\"]{0,40}|\bmLRS[^\s\"]{0,20}", text)
     if version and "version" not in fields:
         fields["version"] = version.group(0)

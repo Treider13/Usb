@@ -8,7 +8,7 @@ from typing import Any
 
 from .ardupilot_vtx import describe as describe_ardupilot_vtx
 from .blackbox import parse_gps_csv, parse_header_file
-from .dump import parse_boxnames, parse_dump
+from .dump import master_or_unique, parse_boxnames, parse_dump
 from .vtx import parse_video_grid, parse_vtx_rules, selected_channel
 from .enums_ardupilot import CAMERA_TYPE_45, MOUNT_TYPE_45, rc_protocols_45
 from .hashing import sha256_bytes, sha256_file
@@ -98,6 +98,51 @@ def _family(inputs: Inputs) -> tuple[str, str]:
     return "unknown", banner
 
 
+def effective_settings(dump) -> dict[str, str]:
+    """Settings used by the named cells. Disagreements stay only in cli_sections."""
+    merged = dict(dump.settings)
+    grouped: dict[str, list[str]] = {}
+    for section in dump.sections:
+        if str(section["name"]).lower().startswith("master"):
+            continue
+        for key, value in section["settings"].items():
+            grouped.setdefault(key, []).append(value)
+    for key, values in grouped.items():
+        if key not in merged and values and all(item == values[0] for item in values):
+            merged[key] = values[0]
+    return merged
+
+
+def _plain(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.decode("latin1", errors="replace").rstrip("\x00")
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def log_inventory(rows: list[dict]) -> dict[str, dict]:
+    """Every DataFlash or tlog message type, with every row."""
+    grouped: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for row in rows:
+        name = str(row.get("name") or "")
+        if name not in grouped:
+            order.append(name)
+            grouped[name] = []
+        grouped[name].append({key: _plain(value) for key, value in row.items() if key != "name"})
+    inventory: dict[str, dict] = {}
+    for name in order:
+        items = grouped[name]
+        entry: dict = {
+            "count": len(items),
+            "fields": list(items[0].keys()) if items else [],
+            "rows": items,
+        }
+        inventory[name] = entry
+    return inventory
+
+
 def _file_record(path: Path, kind: str) -> dict[str, str]:
     return {"kind": kind, "path": str(path), "sha256": sha256_file(path)}
 
@@ -109,8 +154,9 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         else:
             card.put("board_name", missing("в dump all нет строки board_name", "dump all"))
         for key in ("craft_name", "pilot_name"):
-            if key in dump.settings and dump.settings[key] != "":
-                card.put(key, confirmed(dump.settings[key], "dump all"))
+            value = master_or_unique(dump, key)
+            if value:
+                card.put(key, confirmed(value, "dump all"))
             else:
                 card.put(key, missing(f"в dump all нет {key}", "dump all"))
         modes = [
@@ -149,13 +195,37 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
             )
         else:
             card.put("features", missing("в dump all нет строк feature", "dump all"))
-        provider = dump.settings.get("serialrx_provider")
+        if dump.mcu_id:
+            card.put("mcu_id", confirmed(dump.mcu_id, "dump all"))
+        else:
+            card.put("mcu_id", missing("в dump all нет mcu_id", "dump all"))
+        if dump.sections:
+            card.put(
+                "cli_sections",
+                confirmed(
+                    dump.sections,
+                    "dump all",
+                    "каждая секция master, profile и rateprofile сохранена отдельно",
+                ),
+            )
+        else:
+            card.put("cli_sections", missing("в dump all нет строк set и нет других команд", "dump all"))
+        if dump.commands:
+            card.put(
+                "cli_commands",
+                confirmed(dump.commands, "dump all", "строки resource, timer, dma, mixer и остальные команды"),
+            )
+        provider = master_or_unique(dump, "serialrx_provider")
         if provider is not None:
             card.put("serialrx_provider", confirmed(provider, "dump all"))
             _serialrx_class(card, provider)
         else:
             card.put("serialrx_provider", missing("в dump all нет serialrx_provider", "dump all"))
-        express = {key: value for key, value in dump.settings.items() if key.startswith("expresslrs_")}
+        express = {}
+        for section in dump.sections:
+            for key, value in section["settings"].items():
+                if key.startswith("expresslrs_"):
+                    express[f"{section['name']}.{key}" if key in express else key] = value
         if express:
             card.put("expresslrs_spi", confirmed(express, "dump all"))
         card.put(
@@ -182,6 +252,12 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         card.put("parameters", confirmed(params, "bin PARM") if params else missing("в .BIN нет PARM", "bin"))
         card.put("messages", confirmed(messages, "bin MSG") if messages else missing("в .BIN нет MSG", "bin"))
         card.put("modes", confirmed(modes, "bin MODE") if modes else missing("в .BIN нет MODE", "bin"))
+        card.put("log_schema", confirmed(log_inventory(rows), "bin DFReader", "каждый тип сообщения и каждый кадр"))
+        events = [dict(row) for row in rows if row.get("name") == "EV"]
+        for event in events:
+            event.pop("name", None)
+        if events:
+            card.put("log_events", confirmed(events, "bin EV"))
         _known_params(card, params)
         _ardupilot_ports(card, params)
         _baro(card, rows)
@@ -286,7 +362,7 @@ def _betaflight_video(card: Card, dump) -> None:
                 "частоты в МГц из строк vtxtable band, нумерация диапазонов с 1",
             ),
         )
-    selected = selected_channel(dump.settings, grid)
+    selected = selected_channel(effective_settings(dump), grid)
     if selected["frequency_mhz"] is None and selected["band"] is None and selected["vtx_freq_mhz"] in (None, 0):
         card.put(
             "video_frequency_mhz",
@@ -493,6 +569,11 @@ def _radio_fields(card: Card, inputs: Inputs) -> None:
             "radio_secrets_removed",
             confirmed(sorted(set(reading.removed_secrets)), "redact", "значения не сохранены"),
         )
+    if reading.fields:
+        card.put(
+            "radio_page",
+            confirmed(reading.fields, "radio", "все поля страницы или образа после вырезания секретов"),
+        )
     if reading.firmware is None:
         card.put("radio_protocol", missing("в странице или образе нет строки MILELRS, ExpressLRS или mLRS", "radio"))
         return
@@ -592,6 +673,10 @@ def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
     else:
         card.files.append(_file_record(inputs.tlog_path, "tlog"))
         tlog_rows = load_tlog(inputs.tlog_path)
+        card.put(
+            "tlog_schema",
+            confirmed(log_inventory(tlog_rows), "tlog", "каждый тип сообщения и каждый кадр"),
+        )
         tlog_pts, tlog_home, weak = tlog_points(tlog_rows)
         if not tlog_pts:
             journal.append({"source": "tlog", "result": "present_no_fix" if weak else "absent", "detail": f"слабых GPS_RAW_INT: {weak}"})

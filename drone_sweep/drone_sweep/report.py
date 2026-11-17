@@ -82,6 +82,12 @@ LABELS = {
     "blackbox_header": "Заголовок Blackbox",
     "radio_secrets_removed": "Что вырезано из приёмника",
     "radio_fields_requires_auth": "Страница приёмника закрыта паролем",
+    "radio_page": "Все поля приёмника",
+    "cli_sections": "Все секции CLI",
+    "cli_commands": "Остальные команды CLI",
+    "log_schema": "Состав лога",
+    "log_events": "События EV",
+    "tlog_schema": "Состав tlog",
 }
 
 GROUPS = (
@@ -125,6 +131,65 @@ def _show(value) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
 
 
+def _value_html(value) -> str:
+    if isinstance(value, list) and value and all(isinstance(item, dict) and "settings" in item for item in value):
+        blocks = []
+        for section in value:
+            title = html.escape(str(section.get("name", "")))
+            blocks.append(f"<p><strong>{title}</strong></p>")
+            blocks.append(_flat_table(section.get("settings") or {}))
+            lines = section.get("lines") or []
+            if lines:
+                blocks.append("<pre>" + html.escape("\n".join(str(line) for line in lines)) + "</pre>")
+        return "".join(blocks)
+    if isinstance(value, dict) and value and all(isinstance(item, dict) and "count" in item for item in value.values()):
+        rows = []
+        for name, entry in value.items():
+            fields = ", ".join(str(item) for item in entry.get("fields") or [])
+            detail = entry.get("note") or ""
+            rows_value = entry.get("rows")
+            if isinstance(rows_value, list) and len(rows_value) <= 8:
+                detail = json.dumps(rows_value, ensure_ascii=False)
+            elif isinstance(rows_value, list) and rows_value:
+                detail = (
+                    f"все {len(rows_value)} кадров записаны в card.json. "
+                    f"первая {json.dumps(rows_value[0], ensure_ascii=False)} "
+                    f"последняя {json.dumps(rows_value[-1], ensure_ascii=False)}"
+                )
+            rows.append(
+                "<tr>"
+                f"<th>{html.escape(str(name))}</th>"
+                f"<td>{html.escape(str(entry.get('count', '')))}</td>"
+                f"<td>{html.escape(fields)}</td>"
+                f"<td>{html.escape(detail)}</td>"
+                "</tr>"
+            )
+        return "<table><tr><th>Тип</th><th>Кадров</th><th>Поля</th><th>Строки</th></tr>" + "".join(rows) + "</table>"
+    if isinstance(value, dict) and value and all(isinstance(item, list) for item in value.values()):
+        rows = []
+        for name, lines in value.items():
+            rows.append(
+                "<tr>"
+                f"<th>{html.escape(str(name))}</th>"
+                f"<td>{html.escape(chr(10).join(str(line) for line in lines))}</td>"
+                "</tr>"
+            )
+        return "<table>" + "".join(rows) + "</table>"
+    if isinstance(value, dict) and value and all(not isinstance(item, (dict, list)) for item in value.values()):
+        return _flat_table(value)
+    return html.escape(_show(value))
+
+
+def _flat_table(value: dict) -> str:
+    if not value:
+        return "<p>—</p>"
+    rows = "".join(
+        f"<tr><th>{html.escape(str(key))}</th><td>{html.escape(str(item))}</td></tr>"
+        for key, item in value.items()
+    )
+    return f"<table>{rows}</table>"
+
+
 def _cell(name: str, item) -> str:
     shown = _show(item.value)
     wide = " wide" if isinstance(item.value, (dict, list)) or len(shown) > 80 else ""
@@ -134,7 +199,7 @@ def _cell(name: str, item) -> str:
         f"<h3>{html.escape(_label(name))}</h3>"
         f'<p class="key">{html.escape(name)}</p>'
         f'<p><span class="stamp">{html.escape(STATUS_WORD[status])}</span></p>'
-        f'<p class="value">{html.escape(shown)}</p>'
+        f'<p class="value">{_value_html(item.value)}</p>'
         f'<p class="why">{html.escape(item.reason)}</p>'
         f'<p class="src">{html.escape(item.source)}</p>'
         "</article>"

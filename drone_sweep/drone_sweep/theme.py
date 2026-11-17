@@ -96,7 +96,10 @@ label .title { font-weight: 700; }
 .cell { border-bottom: 1px solid rgba(28, 30, 24, 0.28); padding: 12px 16px 12px 0; }
 .cell h3 { margin: 0 0 4px; font-size: 17px; font-weight: 700; color: var(--ink); }
 .key { margin: 0; font-family: "JetBrains Mono", "Liberation Mono", monospace; font-size: 12px; color: var(--mute); }
-.value { margin: 8px 0; white-space: pre-wrap; word-break: break-word; color: var(--ink); }
+.value table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.value th, .value td { border-bottom: 1px solid rgba(28, 30, 24, 0.2); text-align: left; padding: 3px 8px 3px 0; vertical-align: top; font-weight: 400; }
+.value th { width: 32%; }
+.value pre { white-space: pre-wrap; margin: 4px 0 10px; }
 .why, .src { margin: 0; font-size: 14px; color: var(--quiet); }
 .hole { border-left: 4px solid var(--red); padding: 4px 0 4px 12px; margin: 12px 0; }
 .hole p { margin: 4px 0; }
