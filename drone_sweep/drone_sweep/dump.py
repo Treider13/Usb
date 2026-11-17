@@ -19,6 +19,7 @@ _AUX = re.compile(
 _BOARD = re.compile(r"^board_name\s+(\S+)\s*$", re.IGNORECASE)
 _MCU = re.compile(r"^mcu_id\s+(\S+)\s*$", re.IGNORECASE)
 _VERSION = re.compile(r"^#\s*(Betaflight|INAV|Cleanflight)\b.*$", re.IGNORECASE)
+_FEATURE = re.compile(r"^feature\s+(-?)([A-Za-z0-9_]+)\s*$", re.IGNORECASE)
 
 
 @dataclass
@@ -42,6 +43,8 @@ class Dump:
     vtxtable: list[str] = field(default_factory=list)
     vtx: list[str] = field(default_factory=list)
     serial_lines: list[str] = field(default_factory=list)
+    features_enabled: list[str] = field(default_factory=list)
+    features_disabled: list[str] = field(default_factory=list)
     osd: dict[str, str] = field(default_factory=dict)
     failsafe: dict[str, str] = field(default_factory=dict)
 
@@ -66,6 +69,8 @@ def parse_dump(text: str, boxnames: list[str] | None = None) -> Dump:
     vtxtable: list[str] = []
     vtx: list[str] = []
     serial_lines: list[str] = []
+    features_enabled: list[str] = []
+    features_disabled: list[str] = []
     names = boxnames or []
 
     for raw in text.splitlines():
@@ -99,6 +104,13 @@ def parse_dump(text: str, boxnames: list[str] | None = None) -> Dump:
             continue
         if line.lower().startswith("serial "):
             serial_lines.append(line)
+            continue
+        feature = _FEATURE.match(line)
+        if feature:
+            if feature.group(1) == "-":
+                features_disabled.append(feature.group(2))
+            else:
+                features_enabled.append(feature.group(2))
             continue
         aux_match = _AUX.match(line)
         if aux_match:
@@ -134,6 +146,8 @@ def parse_dump(text: str, boxnames: list[str] | None = None) -> Dump:
         vtxtable=vtxtable,
         vtx=vtx,
         serial_lines=serial_lines,
+        features_enabled=features_enabled,
+        features_disabled=features_disabled,
         osd=osd,
         failsafe=failsafe,
     )

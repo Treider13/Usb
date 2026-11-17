@@ -86,6 +86,57 @@ def read_boxnames(port: ScriptedPort) -> str:
     return _msp_payload(frame, MSP_BOXNAMES).decode("latin1", errors="replace")
 
 
+def collect_flight_controller(port) -> tuple[str, str]:
+    """Enter the CLI, read `dump all`, then MSP_BOXNAMES. Nothing is saved."""
+    dump_text = read_cli(port, ["dump all"])
+    boxes = read_boxnames(port)
+    return dump_text, boxes
+
+
+class QuietPort:
+    """Read a real serial port until it stays quiet or the CLI prompt returns.
+
+    `read` is called once per command by `read_cli`. One call keeps pulling
+    until the adapter has been idle, so a long `dump all` is not cut at 4096 bytes.
+    """
+
+    def __init__(self, raw, idle_s: float = 0.4, overall_s: float = 20.0) -> None:
+        self.raw = raw
+        self.idle_s = idle_s
+        self.overall_s = overall_s
+
+    def write(self, data: bytes) -> None:
+        self.raw.write(data)
+        flush = getattr(self.raw, "flush", None)
+        if flush is not None:
+            flush()
+
+    def read(self, size: int = 4096) -> bytes:
+        import time
+
+        buf = bytearray()
+        deadline = time.monotonic() + self.overall_s
+        idle_deadline = time.monotonic() + self.idle_s
+        while time.monotonic() < deadline:
+            chunk = self.raw.read(size)
+            now = time.monotonic()
+            if chunk:
+                buf += chunk
+                idle_deadline = now + self.idle_s
+                if buf.rstrip(b"\r\n ").endswith(b"#"):
+                    idle_deadline = min(idle_deadline, now + 0.05)
+            elif now >= idle_deadline:
+                break
+        return bytes(buf)
+
+
+def open_betaflight_port(path: str) -> QuietPort:
+    import serial
+
+    raw = serial.Serial(path, 115200, timeout=0.05)
+    return QuietPort(raw)
+
+
 def _msp_payload(frame: bytes, code: int) -> bytes:
     if len(frame) < 6 or frame[0:3] != b"$M>":
         raise ValueError("порт не вернул MSP-ответ")

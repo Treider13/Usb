@@ -16,6 +16,7 @@ from .hints import WORKFLOW, hint_for_hole
 from .logs import load_bin, load_tlog
 from .mission_files import parse_gpx, parse_plan, parse_qgc_waypoints
 from .model import Card, confirmed, document, missing, not_applicable
+from .ports import ardupilot_ports, decode_osd_position, parse_betaflight_serial
 from .radio import parse_radio_image, parse_radio_json
 from .route import (
     arm_pairs,
@@ -132,6 +133,19 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         card.put("vtx", confirmed(dump.vtx, "dump all") if dump.vtx else missing("в dump all нет строк vtx", "dump all"))
         _betaflight_video(card, dump)
         card.put("osd", confirmed(dump.osd, "dump all") if dump.osd else missing("в dump all нет osd_*", "dump all"))
+        _osd_layout(card, dump.osd)
+        _betaflight_ports(card, dump)
+        if dump.features_enabled or dump.features_disabled:
+            card.put(
+                "features",
+                confirmed(
+                    {"enabled": dump.features_enabled, "disabled": dump.features_disabled},
+                    "dump feature",
+                    "строка feature без минуса включена, с минусом выключена",
+                ),
+            )
+        else:
+            card.put("features", missing("в dump all нет строк feature", "dump all"))
         provider = dump.settings.get("serialrx_provider")
         if provider is not None:
             card.put("serialrx_provider", confirmed(provider, "dump all"))
@@ -166,9 +180,92 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         card.put("messages", confirmed(messages, "bin MSG") if messages else missing("в .BIN нет MSG", "bin"))
         card.put("modes", confirmed(modes, "bin MODE") if modes else missing("в .BIN нет MODE", "bin"))
         _known_params(card, params)
+        _ardupilot_ports(card, params)
         _baro(card, rows)
         _messages_with_rcin(card, rows, messages)
         _rcin_interval(card, rows)
+
+
+def _osd_layout(card: Card, osd: dict[str, str]) -> None:
+    layout = []
+    for name, raw in osd.items():
+        if not name.endswith("_pos"):
+            continue
+        try:
+            value = int(raw, 10)
+        except ValueError:
+            continue
+        cell = decode_osd_position(value)
+        cell["name"] = name
+        layout.append(cell)
+    if layout:
+        card.put(
+            "osd_layout",
+            confirmed(layout, "dump osd_*_pos", "координаты символа по OSD_X и OSD_Y из osd.h Betaflight 4.5"),
+        )
+
+
+def _betaflight_ports(card: Card, dump) -> None:
+    ports = parse_betaflight_serial(dump.serial_lines)
+    if not ports:
+        card.put("serial_ports", missing("в dump all нет строк serial в формате 4.5", "dump all"))
+        card.put("receiver_port", missing("нет строки serial с битом RX_SERIAL", "dump all"))
+        return
+    card.put(
+        "serial_ports",
+        confirmed(ports, "dump serial", "идентификатор и маска из serial.h Betaflight 4.5"),
+    )
+    receivers = [port for port in ports if "RX_SERIAL" in port["functions"]]
+    if len(receivers) == 1:
+        card.put(
+            "receiver_port",
+            confirmed(
+                receivers[0]["port"],
+                "dump serial",
+                "порт с битом FUNCTION_RX_SERIAL. Проход UART программа не включает.",
+            ),
+        )
+    elif not receivers:
+        card.put("receiver_port", missing("ни один порт не имеет бита RX_SERIAL", "dump serial"))
+    else:
+        card.put(
+            "receiver_port",
+            missing(
+                "бит RX_SERIAL стоит на нескольких портах: " + ", ".join(port["port"] for port in receivers),
+                "dump serial",
+            ),
+        )
+    video = [
+        port["port"]
+        for port in ports
+        if "VTX_SMARTAUDIO" in port["functions"] or "VTX_TRAMP" in port["functions"]
+    ]
+    if video:
+        card.put(
+            "vtx_uart",
+            confirmed(video, "dump serial", "порт, на котором в маске стоит SmartAudio или Tramp"),
+        )
+
+
+def _ardupilot_ports(card: Card, params: dict) -> None:
+    ports = ardupilot_ports(params)
+    if not ports:
+        card.put("serial_ports", missing("в PARM нет SERIALn_PROTOCOL и SERIALn_BAUD", "bin PARM"))
+        return
+    card.put(
+        "serial_ports",
+        confirmed(ports, "bin PARM", "SerialProtocol и map_baudrate из AP_SerialManager Copter 4.5"),
+    )
+    receivers = [port["port"] for port in ports if port.get("receiver")]
+    if len(receivers) == 1:
+        card.put(
+            "receiver_port",
+            confirmed(receivers[0], "bin PARM", "протокол приёмника из SERIALn_PROTOCOL. Проход UART не включается."),
+        )
+    elif not receivers:
+        card.put("receiver_port", missing("среди SERIALn_PROTOCOL нет протокола приёмника", "bin PARM"))
+    else:
+        card.put("receiver_port", missing("протоколы приёмника на нескольких портах: " + ", ".join(receivers), "bin PARM"))
 
 
 def _betaflight_video(card: Card, dump) -> None:
@@ -649,6 +746,9 @@ def _applicability(card: Card) -> None:
             ("aux", "режимы aux есть у Betaflight/INAV"),
             ("vtxtable", "vtxtable есть у Betaflight/INAV"),
             ("vtx", "строки vtx есть у Betaflight/INAV"),
+            ("osd", "позиции osd_* есть у Betaflight/INAV"),
+            ("features", "строки feature есть у Betaflight/INAV"),
+            ("serialrx_provider", "serialrx_provider есть у Betaflight/INAV"),
         ):
             if name not in card.fields:
                 card.put(name, not_applicable(reason, "family"))

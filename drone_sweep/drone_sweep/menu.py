@@ -10,7 +10,7 @@ from .assemble import Inputs, assemble
 from .elrs_http import RadioAuthRequired, fetch_pages, normalize_pages
 from .hints import WORKFLOW
 from .report import render_html
-from .usb_read import ReadOnlyError, assert_readonly_cli
+from .usb_read import ReadOnlyError, assert_readonly_cli, collect_flight_controller, open_betaflight_port
 
 
 APP_NAME = "Стрела"
@@ -95,7 +95,7 @@ def list_usb_ports(directory: Path = Path("/dev")) -> list[str]:
     return found
 
 
-def run_menu(input_lines: list[str], output: list[str] | None = None) -> str:
+def run_menu(input_lines: list[str], output: list[str] | None = None, port_opener=None) -> str:
     """Numbered menu. `input_lines` are the operator's answers, in order."""
     answers_box: list[str] = list(input_lines)
     written: list[str] = output if output is not None else []
@@ -131,7 +131,30 @@ def run_menu(input_lines: list[str], output: list[str] | None = None) -> str:
         elif choice == "3":
             ports = list_usb_ports()
             say("Порты: " + (", ".join(ports) if ports else "не найдены. Подключите полётник кабелем USB и откройте меню снова."))
-            say("Автоматическое чтение порта шлёт только version, dump all и get. set и save отклоняются.")
+            say("Стрела отправит только #, dump all и MSP_BOXNAMES. set, save и serialpassthrough не отправляются.")
+            picked = ask("Путь порта, чтобы снять dump all и собрать карточку. Enter — не читать.").strip()
+            if not picked:
+                continue
+            folder = ask("Папка отчёта").strip()
+            if not folder:
+                say("Папка отчёта обязательна. Порт не открывался.")
+                continue
+            try:
+                port = open_betaflight_port(picked) if port_opener is None else port_opener(picked)
+                dump_text, boxes = collect_flight_controller(port)
+            except (OSError, ReadOnlyError, ValueError) as exc:
+                say(f"Порт не ответил: {exc}. Карточка из пустого ответа не собрана.")
+                continue
+            if "betaflight" not in dump_text.lower() and "inav" not in dump_text.lower() and "cleanflight" not in dump_text.lower():
+                say("В ответе порта нет баннера Betaflight, INAV или Cleanflight. Карточка не собрана, значения не выдуманы.")
+                continue
+            card = assemble(Inputs(dump_text=dump_text, boxnames=boxes))
+            page = write_report(card, Path(folder))
+            say(f"Отчёт: {page}")
+            receiver = card.fields.get("receiver_port")
+            if receiver is not None and receiver.status == "confirmed":
+                say(f"Приёмник назначен на {receiver.value}. Проход UART не включён.")
+            say(f"Дыр: {len(card.holes)}. Источник маршрута: {card.fields['route_source'].value}")
         elif choice == "4":
             base = ask("Адрес, обычно http://10.0.0.1").strip()
             if not base:
