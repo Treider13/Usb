@@ -55,6 +55,7 @@ def load_memory_table(path: Path) -> MemoryRainbowStore:
 
 
 def save_memory_table(store: MemoryRainbowStore, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(store.table, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
