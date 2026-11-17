@@ -179,7 +179,31 @@ def test_fetch_stops_on_401_and_never_calls_write_routes():
 def test_spektrum_has_no_crsf_link_quality():
     card = assemble(Inputs(dump_text="set serialrx_provider = SPEKTRUM2048\n", banner="Betaflight 4.5.0"))
     assert card.fields["serial_link_class"].value == "DSM2/DSMX"
+    assert card.fields["radio_protocol"].value == "SPEKTRUM2048"
+    assert card.fields["spektrum_channel_count"].value == 12
+    assert card.fields["spektrum_baud"].value == 115200
     assert card.fields["uplink_lq"].status == "not_applicable"
+
+
+def test_orange_spi_protocol_is_the_cyrf_dsm_entry():
+    card = assemble(
+        Inputs(
+            dump_text="set rx_spi_protocol = SPEKTRUM\nset spektrum_sat_bind = 0\n",
+            banner="Betaflight 4.5.0",
+            nameplates={"radio": "OrangeRX"},
+        )
+    )
+    assert card.fields["nameplate_radio"].status == "document"
+    assert card.fields["nameplate_radio"].value == "OrangeRX"
+    assert card.fields["radio_protocol"].value == "SPEKTRUM"
+    assert card.fields["radio_protocol"].source == "dump rx_spi_protocol"
+    assert card.fields["spektrum_sat_bind"].value == "0"
+    assert "не отправляется" in card.fields["spektrum_sat_bind"].reason
+
+
+def test_orange_nameplate_without_a_provider_stays_a_sticker():
+    card = assemble(Inputs(banner="Betaflight 4.5.0", nameplates={"radio": "OrangeRX"}))
+    assert card.fields["nameplate_radio"].status == "document"
     assert card.fields["radio_protocol"].status == "missing"
 
 
@@ -189,14 +213,16 @@ def test_crsf_on_the_uart_does_not_name_the_air_protocol():
     assert card.fields["air_protocol"].status == "missing"
 
 
-def test_orange_nameplate_stays_a_nameplate():
+def test_orange_nameplate_does_not_replace_the_provider():
     card = assemble(
         Inputs(
-            dump_text="set serialrx_provider = SPEKTRUM2048\n",
+            dump_text="set serialrx_provider = SPEKTRUM1024\n",
             banner="Betaflight 4.5.0",
             nameplates={"radio": "OrangeRX"},
         )
     )
     assert card.fields["nameplate_radio"].status == "document"
     assert card.fields["nameplate_radio"].value == "OrangeRX"
-    assert card.fields["radio_protocol"].status == "missing"
+    assert card.fields["radio_protocol"].value == "SPEKTRUM1024"
+    assert card.fields["spektrum_channel_count"].value == 7
+    assert card.fields["radio_protocol"].source == "dump serialrx_provider"

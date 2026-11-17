@@ -91,6 +91,9 @@ LABELS = {
     "mavlink_heartbeat": "HEARTBEAT",
     "mavlink_radio_status": "RADIO_STATUS",
     "mavlink_rc_interval_ms": "Шаг записей RC_CHANNELS, мс",
+    "spektrum_channel_count": "Каналы Spektrum",
+    "spektrum_baud": "Скорость Spektrum",
+    "spektrum_sat_bind": "Импульсы привязки Spektrum",
 }
 
 GROUPS = (

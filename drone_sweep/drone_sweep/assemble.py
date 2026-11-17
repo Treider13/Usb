@@ -221,6 +221,26 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
             _serialrx_class(card, provider)
         else:
             card.put("serialrx_provider", missing("в dump all нет serialrx_provider", "dump all"))
+        spi = master_or_unique(dump, "rx_spi_protocol")
+        if spi is not None and spi.strip().upper() == "SPEKTRUM":
+            current = card.fields.get("radio_protocol")
+            if current is None or current.status != "confirmed":
+                card.put(
+                    "radio_protocol",
+                    confirmed(
+                        "SPEKTRUM",
+                        "dump rx_spi_protocol",
+                        "RX_SPI_CYRF6936_DSM, имя SPEKTRUM в lookupTableRxSpi Betaflight 4.5",
+                    ),
+                )
+            if "serial_link_class" not in card.fields:
+                card.put("serial_link_class", confirmed("DSM2/DSMX", "betaflight rx_spi.h"))
+        bind = master_or_unique(dump, "spektrum_sat_bind")
+        if bind is not None:
+            card.put(
+                "spektrum_sat_bind",
+                confirmed(bind, "dump spektrum_sat_bind", "0 — привязка выключена, максимум в spektrum.h равен 10. Команда bind не отправляется."),
+            )
         express = {}
         for section in dump.sections:
             for key, value in section["settings"].items():
@@ -426,13 +446,27 @@ def _rcin_interval(card: Card, rows: list[dict]) -> None:
 def _serialrx_class(card: Card, provider: str) -> None:
     """Names from Betaflight src/main/rx/rx.h SerialRXType.
 
-    SPEKTRUM2048 and SPEKTRUM1024 are the DSM2/DSMX class. OrangeRX uses
-    that class, but the CLI name alone is not the brand on the nameplate.
-    CRSF on the UART is not the air protocol.
+    SPEKTRUM2048 and SPEKTRUM1024 are the DSM2/DSMX class. OrangeRX
+    satellites use that class. The sticker OrangeRX is not itself a
+    protocol name. Channel counts and baud are SPEKTRUM_* in spektrum.h,
+    the same numbers in Betaflight 4.5 and INAV.
     """
     name = provider.strip().upper()
     if name in {"SPEKTRUM2048", "SPEKTRUM1024"}:
+        channels = 12 if name == "SPEKTRUM2048" else 7
         card.put("serial_link_class", confirmed("DSM2/DSMX", "betaflight rx.h"))
+        card.put(
+            "radio_protocol",
+            confirmed(name, "dump serialrx_provider", "класс DSM2/DSMX, приёмники OrangeRX входят в него"),
+        )
+        card.put(
+            "spektrum_channel_count",
+            confirmed(channels, "spektrum.h", "SPEKTRUM_2048_CHANNEL_COUNT или SPEKTRUM_1024_CHANNEL_COUNT"),
+        )
+        card.put(
+            "spektrum_baud",
+            confirmed(115200, "spektrum.h", "SPEKTRUM_BAUDRATE, скорость драйвера, не измерение вылета"),
+        )
         card.put(
             "uplink_lq",
             not_applicable("в rx.h у SPEKTRUM нет источника LQ класса CRSF", "betaflight rx.h"),
@@ -575,7 +609,7 @@ def _radio_fields(card: Card, inputs: Inputs) -> None:
     if reading is None:
         if "expresslrs_spi" in card.fields:
             card.put("radio_protocol", confirmed("ExpressLRS", "dump all expresslrs_*"))
-        else:
+        elif card.fields.get("radio_protocol") is None or card.fields["radio_protocol"].status != "confirmed":
             card.put("radio_protocol", missing("строки прошивки приёмника нет", "radio"))
         return
     if reading.removed_secrets:

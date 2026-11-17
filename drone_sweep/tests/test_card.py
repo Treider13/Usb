@@ -426,14 +426,6 @@ def _write(tmp_path: Path) -> Path:
     path.write_text(BOXES, encoding="utf-8")
     return path
 
-    from drone_sweep.report import render_html
-
-    card = assemble(Inputs(banner="ArduCopter V4.5.7"))
-    page = render_html(card)
-    assert "Что делать, если вы здесь первый раз" in page
-    assert "missing" in page
-    assert "источник none" in page
-
 
 def test_bad_status_cannot_be_constructed():
     with pytest.raises(ValueError):
