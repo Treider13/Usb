@@ -66,6 +66,7 @@ def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
 <div class="actions">
 <a class="action quiet" href="/assemble">Собрать карточку из файлов</a>
 <a class="action quiet" href="/explain">Подсказки</a>
+<a class="action quiet" href="/design/1">Пять видов карточки</a>
 </div>
 <h2>Порядок</h2>
 <ol class="steps">{steps}</ol>
@@ -116,6 +117,14 @@ class StrelaHandler(BaseHTTPRequestHandler):
             self._send(200, form_page())
         elif self.path.startswith("/explain"):
             self._send(200, explain_page())
+        elif self.path.startswith("/design"):
+            from .designs import design_page
+
+            tail = self.path.rstrip("/").rsplit("/", 1)[-1]
+            number = int(tail) if tail.isdigit() else 1
+            if not 1 <= number <= 5:
+                number = 1
+            self._send(200, design_page(number))
         else:
             self._send(404, page("Нет страницы", "<h1>Такой страницы нет</h1><p><a class=\"action\" href=\"/\">Назад к Стреле</a></p>").encode("utf-8"))
 
