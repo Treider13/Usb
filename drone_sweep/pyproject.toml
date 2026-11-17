@@ -15,6 +15,9 @@ strela = "drone_sweep.menu:main"
 [tool.setuptools.packages.find]
 include = ["drone_sweep*"]
 
+[tool.setuptools.package-data]
+drone_sweep = ["linux/*.rules"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

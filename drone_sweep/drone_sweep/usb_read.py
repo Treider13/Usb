@@ -177,10 +177,11 @@ def port_open_error(path: str, exc: OSError) -> str:
     denied = isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 13
     if denied and path.startswith("/dev/tty"):
         return (
-            f"Нет права открыть {path}. На Linux этот порт принадлежит группе dialout. "
-            "Выполните sudo usermod -aG dialout \"$USER\", полностью выйдите из системы и войдите снова. "
-            "До нового входа можно открыть текущий порт командой sudo chmod a+rw "
-            f"{path}. Затем снова нажмите «Считать»."
+            f"Нет права открыть {path}. Это не команда, её не нужно вставлять в терминал. "
+            "Конфигуратор Betaflight для этого добавляет пользователя в группу dialout. "
+            "Конфигуратор INAV ставит правило udev с правами 0666 для STM32 VCP 0483:5740. "
+            "Выполните в папке программы: sudo .venv/bin/strela allow-usb "
+            "Затем снова нажмите «Считать»."
         )
     return str(exc)
 

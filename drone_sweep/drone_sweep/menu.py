@@ -214,6 +214,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dispatch(args: list[str]) -> int:
+    if args and args[0] == "allow-usb":
+        from .usb_access import install_usb_access
+
+        return install_usb_access(sys.argv[0])
     if args and args[0] == "serve":
         from .webapp import ServeError, serve
 
@@ -249,7 +253,7 @@ def _dispatch(args: list[str]) -> int:
             return 2
         return 0
     print(explain_text())
-    print("Команды: strela, strela explain, strela serve --port 8765, strela assemble ...")
+    print("Команды: strela, strela explain, strela serve --port 8765, strela allow-usb, strela assemble ...")
     return 1
 
 
