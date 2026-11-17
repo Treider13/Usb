@@ -45,7 +45,7 @@ def parse_uid_field(text: str) -> list[int]:
     stripped = text.strip()
     if re.fullmatch(r"[\d,\s]+", stripped) and "," in stripped:
         return parse_uid_bytes(stripped)
-    compact = re.sub(r"[\s:]", "", stripped)
+    compact = re.sub(r"[\s:,\-]+", "", stripped)
     if re.fullmatch(r"[0-9a-fA-F]{12}", compact):
         return [int(compact[index : index + 2], 16) for index in range(0, 12, 2)]
     segments = re.split(r"[\s:,;]+", stripped)

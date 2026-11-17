@@ -12,14 +12,14 @@ def test_crack_page_has_nav_tab():
 
 
 def test_handle_uid_action():
-    ok, fragment = handle_elrs_form({"action": "uid", "phrase": "test"})
+    ok, fragment, _prefill = handle_elrs_form({"action": "uid", "phrase": "test"})
     assert ok
     assert "4F04FD822155" in fragment
     assert "79,4,253,130,33,85" in fragment
 
 
 def test_handle_crack_missing_wordlist():
-    ok, fragment = handle_elrs_form({"action": "crack", "uid": "79,4,253,130,33,85"})
+    ok, fragment, _prefill = handle_elrs_form({"action": "crack", "uid": "79,4,253,130,33,85"})
     assert not ok
     assert "словарь" in fragment.lower()
 
@@ -27,7 +27,7 @@ def test_handle_crack_missing_wordlist():
 def test_handle_crack_accepts_the_hex_uid_shown_above(tmp_path):
     words = tmp_path / "words.txt"
     words.write_text("nope\ntest\n", encoding="utf-8")
-    ok, fragment = handle_elrs_form(
+    ok, fragment, _prefill = handle_elrs_form(
         {"action": "crack", "uid": "4F04FD822155", "binding_wordlist": str(words)}
     )
     assert ok
