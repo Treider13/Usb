@@ -27,6 +27,8 @@ QUESTIONS = (
     ("plan", "Файл .plan"),
     ("radio_json", "Сохранённый JSON страницы приёмника"),
     ("radio_image", "Образ flash приёмника"),
+    ("binding_wordlist", "Словарь binding phrase (Enter — не подбирать)"),
+    ("binding_memory_table", "JSON RAM-таблицы (Enter — пропустить)"),
     ("nameplate_vtx", "Шильдик видеопередатчика"),
     ("nameplate_radio", "Шильдик радиомодуля"),
     ("nameplate_gimbal", "Шильдик подвеса"),
@@ -72,6 +74,8 @@ def inputs_from_answers(answers: dict[str, str]) -> Inputs:
         diff_text=text_of(path_of("diff")),
         wp_text=text_of(path_of("wp")),
         auth_declined=answers.get("auth_declined", "").strip() in {"1", "yes", "да"},
+        binding_wordlist=path_of("binding_wordlist"),
+        binding_memory_table=path_of("binding_memory_table"),
     )
 
 
@@ -258,6 +262,10 @@ def _dispatch(args: list[str]) -> int:
         return assemble_main(args)
     if args[0] == "diff":
         return _diff_cards(args[1:])
+    if args[0] == "elrs":
+        from .elrs_cli import main as elrs_main
+
+        return elrs_main(args[1:])
     if args[0] == "check-command":
         try:
             print(guard_cli(" ".join(args[1:])))
@@ -266,7 +274,11 @@ def _dispatch(args: list[str]) -> int:
             return 2
         return 0
     print(explain_text())
-    print("Команды: strela, strela explain, strela serve --port 8765, strela assemble ..., strela diff a.json b.json")
+    print(
+        "Команды: strela, strela explain, strela serve --port 8765, strela assemble ..., "
+        "strela diff a.json b.json, "
+        "strela elrs uid|dump|crack|lookup|lookup-memory|build-rainbow|build-memory ..."
+    )
     return 1
 
 

@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .dump_elrs import extract_json_objects, uid_list_to_field
 from .redact import redact_json, redact_text_blob, _secret_name
 
 
@@ -85,7 +86,21 @@ def parse_radio_image(blob: bytes) -> RadioReading:
     version = re.search(r"MILELRS_v\d+|ExpressLRS[^\s\"]{0,40}|\bmLRS[^\s\"]{0,20}", text)
     if version and "version" not in fields:
         fields["version"] = version.group(0)
+    _merge_elrs_json_from_blob(blob, fields, removed)
+    if firmware is None and fields.get("uid"):
+        firmware = "ExpressLRS"
     return RadioReading(firmware, fields, removed, redacted)
+
+
+def _merge_elrs_json_from_blob(blob: bytes, fields: dict[str, str], removed: list[str]) -> None:
+    for entry in extract_json_objects(blob):
+        uid_text = uid_list_to_field(entry.get("uid"))
+        if uid_text and "uid" not in fields:
+            fields["uid"] = uid_text
+        if entry.get("wifi_ssid") and "wifi_ssid" not in fields:
+            fields["wifi_ssid"] = str(entry["wifi_ssid"])
+        if entry.get("wifi_password"):
+            removed.append("wifi-password")
 
 
 _MLRS_PARAM = re.compile(r"^  (.+?) = (.*)$")

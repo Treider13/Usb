@@ -2,7 +2,7 @@
 
 from drone_sweep.assemble import Inputs, assemble
 from drone_sweep.report import render_html
-from drone_sweep.webapp import explain_page, form_page, home_page
+from drone_sweep.webapp import crack_page, explain_page, form_page, home_page
 from tests.test_ports import DUMP
 
 
@@ -15,13 +15,17 @@ def test_report_names_fields_in_russian_and_keeps_every_key():
     assert "Нет данных" in page
     assert "С шильдика" in page
     assert "Skyzone VT7550" in page
-    assert "С чего начать" in page
+    assert "С чего начать" not in page
+    assert "Откуда маршрут" not in page
+    assert "usb STATUSTEXT" not in page
+    assert "из баннера" not in page
     assert "strela" not in page.lower() or "Стрела" in page
     for name, item in card.fields.items():
         if item.status == "not_applicable":
             continue
         assert f">{name}<" in page or f">{name}</p>" in page
     assert 'class="key">' in page
+    assert "Какая плата" in page
     assert "--primary-500: #ffbb00" in page
     assert "#e5f6e5" not in page
 
@@ -30,7 +34,8 @@ def test_menu_pages_use_the_same_sheet():
     home = home_page().decode("utf-8")
     form = form_page().decode("utf-8")
     explain = explain_page().decode("utf-8")
-    for body in (home, form, explain):
+    crack = crack_page().decode("utf-8")
+    for body in (home, form, crack, explain):
         assert 'class="sheet"' in body
         assert "Liberation Sans" in body
     assert "Собрать карточку" in home
@@ -39,6 +44,8 @@ def test_menu_pages_use_the_same_sheet():
     assert "Собрать карточку" in form
     assert "dump all" in form
     assert "парол" in explain.lower()
+    assert "/crack" in explain
+    assert "binding_wordlist" in form
     assert "Файл отчёта" not in home
     assert "Пять видов" not in home
     assert "/design" not in home

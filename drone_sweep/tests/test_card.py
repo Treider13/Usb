@@ -189,10 +189,10 @@ def test_no_gps_bin_is_missing_not_a_guess(tmp_path: Path):
     assert card.fields["baro_alt"].value["max"] == 158.0
     assert card.fields["baro_alt"].reason.startswith("барометр")
     assert card.fields["rc_protocols"].value["bits"] == ["All"]
-    assert card.fields["mnt1_type"].value["label"] == "Siyi"
-    assert card.fields["cam1_type"].value["label"] == "Mount"
+    assert card.fields["mnt1_type"].value == "подвес Siyi"
+    assert card.fields["cam1_type"].value == "камера через подвес"
     assert card.fields["nameplate_gimbal"].value == "STorM32"
-    assert card.fields["mnt1_type"].value["label"] != card.fields["nameplate_gimbal"].value
+    assert card.fields["mnt1_type"].value != card.fields["nameplate_gimbal"].value
     assert card.fields["vtx_device_responded"].status == "missing"
     assert card.fields["radio_protocol"].status == "missing"
     assert card.fields["radio_swarm_id"].status == "not_applicable"
@@ -202,7 +202,28 @@ def test_no_gps_bin_is_missing_not_a_guess(tmp_path: Path):
     drop = next(item for item in joined if item["text"] == "Drop script is running")
     assert drop["rcin"]["C11"] == 982
     assert any("источник none" in hole for hole in card.holes)
+    page = __import__("drone_sweep.report", fromlist=["render_html"]).render_html(card)
+    assert "Вылет 0" not in page
+    assert "arm_time_us" not in page
+    assert "\"C1\"" not in page
+    assert "mavpackettype" not in page
+    assert "Стики пульта" in page
+    assert "Строки журнала" in page
     assert any(line["source"] == "bin_pos" and line["result"] == "ignored" for line in card.journal)
+
+
+def test_camera_and_mount_set_to_none_are_not_confirmed():
+    card = assemble(
+        Inputs(
+            mavlink_rows=[
+                {"name": "HEARTBEAT", "autopilot": 3, "type": 2},
+                {"name": "PARAM_VALUE", "param_id": "CAM1_TYPE", "param_value": 0},
+                {"name": "PARAM_VALUE", "param_id": "MNT1_TYPE", "param_value": 0},
+            ]
+        )
+    )
+    assert "cam1_type" not in card.fields
+    assert "mnt1_type" not in card.fields
 
 
 def test_gps_track_uses_3d_fix_at_arm_not_the_first_point(tmp_path: Path):

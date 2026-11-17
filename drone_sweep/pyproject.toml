@@ -9,6 +9,9 @@ description = "Стрела: read-only drone card from Betaflight, INAV, ArduPil
 requires-python = ">=3.11"
 dependencies = ["pymavlink==2.4.43", "pyserial==3.5"]
 
+[project.optional-dependencies]
+rainbow = ["redis>=5.0"]
+
 [project.scripts]
 strela = "drone_sweep.menu:main"
 
