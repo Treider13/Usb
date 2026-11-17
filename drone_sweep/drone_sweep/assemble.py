@@ -9,7 +9,7 @@ from typing import Any
 from .ardupilot_vtx import describe as describe_ardupilot_vtx
 from .blackbox import parse_gps_csv, parse_header_file
 from .dump import master_or_unique, parse_boxnames, parse_dump
-from .vtx import parse_video_grid, parse_vtx_rules, selected_channel
+from .vtx import inav_grid, inav_saved_frequency, parse_video_grid, parse_vtx_rules, selected_channel
 from .enums_ardupilot import CAMERA_TYPE_45, MOUNT_TYPE_45, rc_protocols_45
 from .hashing import sha256_bytes, sha256_file
 from .hints import WORKFLOW, hint_for_hole
@@ -182,7 +182,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         card.put("vtx", confirmed(dump.vtx, "dump all") if dump.vtx else missing("в dump all нет строк vtx", "dump all"))
         _betaflight_video(card, dump)
         card.put("osd", confirmed(dump.osd, "dump all") if dump.osd else missing("в dump all нет osd_*", "dump all"))
-        _osd_layout(card, dump.osd)
+        _osd_layout(card, dump.osd, card.family)
         _betaflight_ports(card, dump)
         if dump.features_enabled or dump.features_disabled:
             card.put(
@@ -265,7 +265,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         _rcin_interval(card, rows)
 
 
-def _osd_layout(card: Card, osd: dict[str, str]) -> None:
+def _osd_layout(card: Card, osd: dict[str, str], family: str = "betaflight") -> None:
     layout = []
     for name, raw in osd.items():
         if not name.endswith("_pos"):
@@ -274,25 +274,28 @@ def _osd_layout(card: Card, osd: dict[str, str]) -> None:
             value = int(raw, 10)
         except ValueError:
             continue
-        cell = decode_osd_position(value)
+        cell = decode_osd_position(value, family)
         cell["name"] = name
         layout.append(cell)
     if layout:
-        card.put(
-            "osd_layout",
-            confirmed(layout, "dump osd_*_pos", "координаты символа по OSD_X и OSD_Y из osd.h Betaflight 4.5"),
+        reason = (
+            "координаты символа по OSD_X и OSD_Y из osd.h INAV"
+            if family == "inav"
+            else "координаты символа по OSD_X и OSD_Y из osd.h Betaflight 4.5"
         )
+        card.put("osd_layout", confirmed(layout, "dump osd_*_pos", reason))
 
 
 def _betaflight_ports(card: Card, dump) -> None:
-    ports = parse_betaflight_serial(dump.serial_lines)
+    ports = parse_betaflight_serial(dump.serial_lines, card.family)
     if not ports:
         card.put("serial_ports", missing("в dump all нет строк serial в формате 4.5", "dump all"))
         card.put("receiver_port", missing("нет строки serial с битом RX_SERIAL", "dump all"))
         return
+    header = "serial.h INAV" if card.family == "inav" else "serial.h Betaflight 4.5"
     card.put(
         "serial_ports",
-        confirmed(ports, "dump serial", "идентификатор и маска из serial.h Betaflight 4.5"),
+        confirmed(ports, "dump serial", f"идентификатор и маска из {header}"),
     )
     receivers = [port for port in ports if "RX_SERIAL" in port["functions"]]
     if len(receivers) == 1:
@@ -378,6 +381,17 @@ def _betaflight_video(card: Card, dump) -> None:
             "video_frequency_mhz",
             confirmed(selected["frequency_mhz"], f"dump {selected['frequency_source']}", "сохранённая настройка, не ответ передатчика"),
         )
+    if card.family == "inav" and selected["frequency_mhz"] is None:
+        mhz, detail = inav_saved_frequency(effective_settings(dump))
+        if mhz is not None:
+            card.put("video_frequency_mhz", confirmed(mhz, detail, "таблица прошивки INAV, не ответ передатчика"))
+            group_raw = effective_settings(dump).get("vtx_frequency_group", "0")
+            group = 2 if str(group_raw).upper() in {"2", "FREQUENCYGROUP_1G3"} else 0
+            grid_value = inav_grid(group)
+            if grid_value is not None and "video_grid" not in card.fields:
+                card.put("video_grid", confirmed(grid_value, detail, "сетка из vtx_string.c, нумерация диапазонов с 1"))
+        else:
+            card.put("video_frequency_mhz", missing(detail, "dump all"))
     if selected["power"] is not None:
         card.put("video_power", confirmed(selected["power"], "dump vtx_power + vtxtable powervalues"))
     rules = parse_vtx_rules(dump.vtx, grid)
@@ -628,6 +642,58 @@ def _nameplates(card: Card, plates: dict[str, str]) -> None:
         card.put(f"nameplate_{key}", document(value, "nameplate", "шильдик, не этот вылет и не протокол"))
 
 
+def _absorb_mavlink(card: Card, rows: list[dict]) -> None:
+    """Fields a .tlog actually contains: heartbeat, parameters, radio status, RC spacing."""
+    beats = [row for row in rows if row.get("name") == "HEARTBEAT"]
+    if beats:
+        beat = {key: _plain(value) for key, value in beats[0].items() if key != "name"}
+        card.put("mavlink_heartbeat", confirmed(beat, "tlog HEARTBEAT"))
+        if card.family == "unknown":
+            card.family = "ardupilot" if beat.get("autopilot") == 3 else "mavlink"
+            card.raw_banner = card.raw_banner or "MAVLink HEARTBEAT"
+    elif card.family == "unknown" and rows:
+        card.family = "mavlink"
+        card.raw_banner = card.raw_banner or "MAVLink tlog"
+    params: dict[str, Any] = {}
+    for row in rows:
+        if row.get("name") != "PARAM_VALUE":
+            continue
+        name = str(_plain(row.get("param_id")) or "").strip().strip("\x00")
+        if name:
+            params[name] = _plain(row.get("param_value"))
+    if params and (card.fields.get("parameters") is None or card.fields["parameters"].status != "confirmed"):
+        card.put("parameters", confirmed(params, "tlog PARAM_VALUE"))
+        _known_params(card, params)
+        _ardupilot_ports(card, params)
+    radios = [row for row in rows if row.get("name") == "RADIO_STATUS"]
+    if radios:
+        kept = {
+            key: _plain(value)
+            for key, value in radios[-1].items()
+            if key not in {"name", "mavpackettype"}
+        }
+        card.put(
+            "mavlink_radio_status",
+            confirmed(kept, "tlog RADIO_STATUS", "качество линии из сообщения RADIO_STATUS, не пакетрейт"),
+        )
+    stamps = sorted(
+        float(row["time_boot_ms"])
+        for row in rows
+        if row.get("name") == "RC_CHANNELS" and row.get("time_boot_ms") is not None
+    )
+    deltas = [right - left for left, right in zip(stamps, stamps[1:]) if right > left]
+    if len(deltas) >= 1:
+        deltas.sort()
+        card.put(
+            "mavlink_rc_interval_ms",
+            confirmed(
+                deltas[len(deltas) // 2],
+                "tlog RC_CHANNELS",
+                "медиана шага записей RC_CHANNELS, не пакетрейт радиолинии",
+            ),
+        )
+
+
 def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
     journal: list[dict[str, str]] = []
     bin_points: list[dict] = []
@@ -677,6 +743,7 @@ def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
             "tlog_schema",
             confirmed(log_inventory(tlog_rows), "tlog", "каждый тип сообщения и каждый кадр"),
         )
+        _absorb_mavlink(card, tlog_rows)
         tlog_pts, tlog_home, weak = tlog_points(tlog_rows)
         if not tlog_pts:
             journal.append({"source": "tlog", "result": "present_no_fix" if weak else "absent", "detail": f"слабых GPS_RAW_INT: {weak}"})
@@ -689,6 +756,19 @@ def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
         header = parse_header_file(inputs.blackbox_path)
         if header:
             card.put("blackbox_header", confirmed(header, "blackbox H"))
+            if card.family == "unknown":
+                label = " ".join(
+                    header.get(key, "") for key in ("Firmware type", "Firmware revision")
+                ).strip()
+                folded = label.lower()
+                if "inav" in folded:
+                    card.family = "inav"
+                elif "betaflight" in folded or "cleanflight" in folded:
+                    card.family = "betaflight" if "betaflight" in folded else "cleanflight"
+                elif "ardu" in folded:
+                    card.family = "ardupilot"
+                if card.family != "unknown" and not card.raw_banner:
+                    card.raw_banner = label
             if "Craft name" in header and "craft_name" not in card.fields:
                 card.put("craft_name", confirmed(header["Craft name"], "blackbox H"))
             if "rc_smoothing_rx_smoothed" in header:
@@ -845,7 +925,7 @@ def _publish_route(card: Card, flights: list[dict], mission: list[dict], mission
 
 def _applicability(card: Card) -> None:
     beta = card.family in ("betaflight", "inav", "cleanflight")
-    ardu = card.family == "ardupilot"
+    ardu = card.family in ("ardupilot", "mavlink")
     if ardu:
         for name, reason in (
             ("craft_name", "имя борта CLI Betaflight/INAV"),

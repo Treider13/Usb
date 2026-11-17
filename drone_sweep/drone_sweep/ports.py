@@ -57,10 +57,10 @@ BF_FUNCTION_BITS = (
 _SERIAL = re.compile(r"^serial\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$", re.IGNORECASE)
 
 
-def function_names(mask: int) -> list[str]:
+def function_names(mask: int, bits: tuple[tuple[int, str], ...] = BF_FUNCTION_BITS) -> list[str]:
     names = []
     known = set()
-    for bit, name in BF_FUNCTION_BITS:
+    for bit, name in bits:
         known.add(bit)
         if mask & (1 << bit):
             names.append(name)
@@ -72,7 +72,57 @@ def function_names(mask: int) -> list[str]:
     return names
 
 
-def parse_betaflight_serial(lines: list[str]) -> list[dict]:
+# src/main/io/serial.h on INAV master. Bit 6 is still RX_SERIAL.
+# From bit 8 the names differ from Betaflight 4.5.
+INAV_PORT_NAMES = {
+    0: "USART1",
+    1: "USART2",
+    2: "USART3",
+    3: "USART4",
+    4: "USART5",
+    5: "USART6",
+    6: "USART7",
+    7: "USART8",
+    20: "USB_VCP",
+    30: "SOFTSERIAL1",
+    31: "SOFTSERIAL2",
+}
+
+INAV_FUNCTION_BITS = (
+    (0, "MSP"),
+    (1, "GPS"),
+    (2, "UNUSED_3"),
+    (3, "TELEMETRY_HOTT"),
+    (4, "TELEMETRY_LTM"),
+    (5, "TELEMETRY_SMARTPORT"),
+    (6, "RX_SERIAL"),
+    (7, "BLACKBOX"),
+    (8, "TELEMETRY_MAVLINK"),
+    (9, "TELEMETRY_IBUS"),
+    (10, "RCDEVICE"),
+    (11, "VTX_SMARTAUDIO"),
+    (12, "VTX_TRAMP"),
+    (13, "UNUSED_1"),
+    (14, "OPTICAL_FLOW"),
+    (15, "LOG"),
+    (16, "RANGEFINDER"),
+    (17, "VTX_FFPV"),
+    (18, "ESCSERIAL"),
+    (19, "TELEMETRY_SIM"),
+    (20, "FRSKY_OSD"),
+    (21, "DJI_HD_OSD"),
+    (22, "SERVO_SERIAL"),
+    (23, "TELEMETRY_SMARTPORT_MASTER"),
+    (25, "MSP_OSD"),
+    (26, "GIMBAL"),
+    (27, "GIMBAL_HEADTRACKER"),
+)
+
+
+def parse_betaflight_serial(lines: list[str], family: str = "betaflight") -> list[dict]:
+    inav = family == "inav"
+    names = INAV_PORT_NAMES if inav else BF_PORT_NAMES
+    bits = INAV_FUNCTION_BITS if inav else BF_FUNCTION_BITS
     ports = []
     for raw in lines:
         match = _SERIAL.match(raw.strip())
@@ -82,9 +132,9 @@ def parse_betaflight_serial(lines: list[str]) -> list[dict]:
         ports.append(
             {
                 "identifier": identifier,
-                "port": BF_PORT_NAMES.get(identifier, f"identifier {identifier}"),
+                "port": names.get(identifier, f"identifier {identifier}"),
                 "function_mask": mask,
-                "functions": function_names(mask),
+                "functions": function_names(mask, bits),
                 "msp_baud": msp,
                 "gps_baud": gps,
                 "telemetry_baud": telemetry,
@@ -98,8 +148,20 @@ def parse_betaflight_serial(lines: list[str]) -> list[dict]:
     return ports
 
 
-def decode_osd_position(value: int) -> dict:
-    """src/main/osd/osd.h on Betaflight 4.5: OSD_X, OSD_Y, OSD_TYPE, profile bits at 11."""
+def decode_osd_position(value: int, family: str = "betaflight") -> dict:
+    """Position bits from the firmware header.
+
+    Betaflight 4.5 osd.h: OSD_X uses bits 0-4 and bit 10, OSD_Y uses bits 5-9.
+    INAV osd.h: OSD_X is bits 0-5, OSD_Y is bits 6-11, visible is bit 13.
+    """
+    if family == "inav":
+        return {
+            "x": value & 0x3F,
+            "y": (value >> 6) & 0x3F,
+            "visible": bool(value & 0x2000),
+            "type": None,
+            "raw": value,
+        }
     x = (value & 0x1F) | ((value & 0x400) >> 5)
     y = (value >> 5) & 0x1F
     return {

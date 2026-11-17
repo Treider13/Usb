@@ -97,6 +97,58 @@ def parse_vtx_rules(lines: list[str], grid: VideoGrid) -> list[dict]:
     return rules
 
 
+def inav_saved_frequency(settings: dict[str, str]) -> tuple[int | None, str]:
+    """Frequency from INAV's compiled tables in src/main/io/vtx_string.c.
+
+    vtx_tramp.c looks up 5.8 GHz unless frequencyGroup is FREQUENCYGROUP_1G3.
+    FREQUENCYGROUP_2G4 has no MHz table on that path. Band and channel are 1-based.
+    Power stays an index: milliwatts come from the VTX reply, which a dump does not contain.
+    """
+    def integer(name: str) -> int | None:
+        raw = settings.get(name)
+        if raw is None or str(raw).strip() == "":
+            return None
+        text = str(raw).strip()
+        if text.upper() == "FREQUENCYGROUP_5G8":
+            return 0
+        if text.upper() == "FREQUENCYGROUP_2G4":
+            return 1
+        if text.upper() == "FREQUENCYGROUP_1G3":
+            return 2
+        return int(text)
+
+    freq = integer("vtx_freq")
+    if freq not in (None, 0):
+        return freq, "dump vtx_freq"
+    band = integer("vtx_band")
+    channel = integer("vtx_channel")
+    if band is None or channel is None:
+        return None, "в дампе INAV нет vtx_band и vtx_channel"
+    group = integer("vtx_frequency_group")
+    if group is None:
+        group = 0
+    table = _INAV_1G3 if group == 2 else None if group == 1 else _INAV_58
+    if table is None:
+        return None, "vtx_frequency_group = FREQUENCYGROUP_2G4. В vtx_tramp.c для этой группы нет таблицы МГц. Таблица FFPV относится к другому протоколу и сюда не подставляется."
+    if band < 1 or channel < 1 or band > len(table) or channel > len(table[band - 1]):
+        return None, "vtx_band/vtx_channel вне таблицы INAV для этой группы"
+    source = "inav vtx_string.c vtx1G3frequencyTable" if group == 2 else "inav vtx_string.c vtx58frequencyTable"
+    if integer("vtx_frequency_group") is None:
+        source += ", группа в дампе не задана, у прошивки значение по умолчанию 5.8"
+    return table[band - 1][channel - 1], source
+
+
+def inav_grid(group: int) -> dict | None:
+    table = _INAV_1G3 if group == 2 else _INAV_58 if group in (0, None) else None
+    if table is None:
+        return None
+    names = ("A", "B") if group == 2 else ("A", "B", "E", "F", "R")
+    return {
+        str(index + 1): {"name": names[index], "frequencies_mhz": list(row)}
+        for index, row in enumerate(table)
+    }
+
+
 def selected_channel(settings: dict[str, str], grid: VideoGrid) -> dict:
     """The channel saved in vtx_band / vtx_channel / vtx_freq."""
     def integer(name: str) -> int | None:
@@ -129,3 +181,18 @@ def selected_channel(settings: dict[str, str], grid: VideoGrid) -> dict:
         result["frequency_mhz"] = looked
         result["frequency_source"] = "vtxtable"
     return result
+
+
+# vtx58frequencyTable and vtx1G3frequencyTable from INAV src/main/io/vtx_string.c.
+# Indexes here are 0-based; the settings vtx_band and vtx_channel are 1-based.
+_INAV_58 = (
+    (5865, 5845, 5825, 5805, 5785, 5765, 5745, 5725),
+    (5733, 5752, 5771, 5790, 5809, 5828, 5847, 5866),
+    (5705, 5685, 5665, 5645, 5885, 5905, 5925, 5945),
+    (5740, 5760, 5780, 5800, 5820, 5840, 5860, 5880),
+    (5658, 5695, 5732, 5769, 5806, 5843, 5880, 5917),
+)
+_INAV_1G3 = (
+    (1080, 1120, 1160, 1200, 1240, 1280, 1320, 1360),
+    (1080, 1120, 1160, 1200, 1258, 1280, 1320, 1360),
+)

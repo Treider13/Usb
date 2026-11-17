@@ -155,3 +155,42 @@ def test_packet_rate_fields_are_not_copied_onto_each_other(tmp_path: Path):
     assert tx.fields["radio_tx_packet_rate"].value == "6"
     assert "не частота из лога" in tx.fields["radio_tx_packet_rate"].reason
     assert "packet_rate_log_hz" not in tx.fields
+
+
+INAV_DUMP = """\
+# INAV/MATEKF405 7.1.2
+serial 0 64 115200 57600 0 115200
+serial 3 256 115200 57600 0 115200
+set vtx_band = 1
+set vtx_channel = 1
+set vtx_frequency_group = 0
+set vtx_power = 2
+set osd_alt_pos = 234
+"""
+
+
+def test_inav_uses_its_own_port_bits_and_58_table():
+    card = assemble(Inputs(dump_text=INAV_DUMP))
+    assert card.family == "inav"
+    ports = {item["port"]: item for item in card.fields["serial_ports"].value}
+    assert ports["USART1"]["functions"] == ["RX_SERIAL"]
+    assert ports["USART4"]["functions"] == ["TELEMETRY_MAVLINK"]
+    assert card.fields["video_frequency_mhz"].value == 5865
+    assert "vtx58frequencyTable" in card.fields["video_frequency_mhz"].source
+    assert card.fields["video_grid"].value["1"]["frequencies_mhz"][0] == 5865
+    assert "video_power" not in card.fields
+    layout = {item["name"]: item for item in card.fields["osd_layout"].value}
+    assert layout["osd_alt_pos"]["x"] == 234 & 0x3F
+    assert layout["osd_alt_pos"]["y"] == (234 >> 6) & 0x3F
+    assert layout["osd_alt_pos"]["visible"] is False
+
+
+def test_inav_13_table_and_24_group_without_a_mhz_table():
+    low = INAV_DUMP.replace("set vtx_frequency_group = 0", "set vtx_frequency_group = 2")
+    card = assemble(Inputs(dump_text=low))
+    assert card.fields["video_frequency_mhz"].value == 1080
+    assert "vtx1G3frequencyTable" in card.fields["video_frequency_mhz"].source
+    high = INAV_DUMP.replace("set vtx_frequency_group = 0", "set vtx_frequency_group = 1")
+    missing = assemble(Inputs(dump_text=high))
+    assert missing.fields["video_frequency_mhz"].status == "missing"
+    assert "FREQUENCYGROUP_2G4" in missing.fields["video_frequency_mhz"].reason

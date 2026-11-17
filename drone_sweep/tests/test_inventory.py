@@ -2,7 +2,7 @@
 
 import json
 
-from drone_sweep.assemble import Inputs, assemble, log_inventory
+from drone_sweep.assemble import Inputs, _absorb_mavlink, assemble, log_inventory
 from drone_sweep.dump import parse_dump
 from drone_sweep.radio import parse_radio_json
 from drone_sweep.report import render_html
@@ -83,7 +83,31 @@ def test_mlrs_cli_keeps_printed_values_and_drops_the_bind_phrase():
     assert "serialpassthrough" not in dumped
 
 
-def test_log_inventory_lists_every_message_type():
+def test_mavlink_tlog_keeps_heartbeat_parameters_and_radio_status():
+    from drone_sweep.model import Card
+
+    card = Card(family="unknown")
+    _absorb_mavlink(
+        card,
+        [
+            {"name": "HEARTBEAT", "autopilot": 3, "type": 2, "mavlink_version": 3},
+            {"name": "PARAM_VALUE", "param_id": "SERIAL1_PROTOCOL", "param_value": 29},
+            {"name": "PARAM_VALUE", "param_id": "VTX_BAND", "param_value": 0},
+            {"name": "PARAM_VALUE", "param_id": "VTX_CHANNEL", "param_value": 0},
+            {"name": "PARAM_VALUE", "param_id": "VTX_FREQ", "param_value": 0},
+            {"name": "RADIO_STATUS", "rssi": 200, "remrssi": 180, "rxerrors": 1, "fixed": 100},
+            {"name": "RC_CHANNELS", "time_boot_ms": 0},
+            {"name": "RC_CHANNELS", "time_boot_ms": 20},
+            {"name": "RC_CHANNELS", "time_boot_ms": 40},
+        ],
+    )
+    assert card.family == "ardupilot"
+    assert card.fields["receiver_port"].value == "SERIAL1"
+    assert card.fields["video_frequency_mhz"].value == 5865
+    assert card.fields["mavlink_radio_status"].value["rssi"] == 200
+    assert "не пакетрейт" in card.fields["mavlink_radio_status"].reason
+    assert card.fields["mavlink_rc_interval_ms"].value == 20
+    assert "не пакетрейт" in card.fields["mavlink_rc_interval_ms"].reason
     rows = [{"name": "EV", "TimeUS": 1, "Id": 10}] + [
         {"name": "IMU", "TimeUS": index, "AccX": index} for index in range(31)
     ]
