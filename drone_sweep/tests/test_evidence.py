@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from drone_sweep.assemble import Inputs, assemble
+from drone_sweep.model import Card, confirmed
 from drone_sweep.compare import diff_cards, render_diff
 from drone_sweep.logs import flight_timeline
 from drone_sweep.menu import main
@@ -217,6 +218,75 @@ def test_two_cards_diff_ignores_holes(tmp_path: Path):
     left_path.write_text(json.dumps(left.to_dict()), encoding="utf-8")
     right_path.write_text(json.dumps(right.to_dict()), encoding="utf-8")
     assert main(["diff", str(left_path), str(right_path)]) == 0
+
+
+def test_card_explains_ports_video_and_diff_in_words():
+    card = Card(family="betaflight")
+    card.put(
+        "serial_ports",
+        confirmed(
+            [
+                {"port": "USB_VCP", "functions": ["MSP"], "msp_baud": 115200},
+                {"port": "USART1", "functions": []},
+                {"port": "USART2", "functions": []},
+            ],
+            "dump serial",
+        ),
+    )
+    card.put(
+        "video_grid",
+        confirmed(
+            {
+                "bands": {"1": {"name": "BOSCAM_A", "letter": "A", "frequencies_mhz": [5865, 5845]}},
+                "power_mw": [25, 100],
+                "power_labels": ["MIN", "200"],
+            },
+            "dump vtxtable",
+        ),
+    )
+    card.put(
+        "vtx_switch_rules",
+        confirmed(
+            [
+                {
+                    "aux_channel": 5,
+                    "band": 5,
+                    "channel": 7,
+                    "range_start_us": 1750,
+                    "range_end_us": 1850,
+                    "frequency_mhz": None,
+                    "power": {"label": "MIN", "mw": 25},
+                },
+                {"aux_channel": 0, "band": 0, "channel": 0, "range_start_us": 900, "range_end_us": 900, "power": None},
+            ],
+            "dump vtx",
+        ),
+    )
+    card.put(
+        "cli_diff",
+        confirmed(
+            {
+                "set": {"pilot_name": "505140", "vtx_freq": "5880", "osd_rssi_pos": "14391"},
+                "feature": ["OSD"],
+                "vtx": ["vtx 0 5 5 1 1 975 1050"],
+            },
+            "diff all",
+        ),
+    )
+    page = render_html(card)
+    assert "Приёмник пульта ни на один разъём не назначен" in page
+    assert "USB_VCP" in page
+    assert "Пустые: USART1, USART2" in page
+    assert "function_mask" not in page
+    assert "BOSCAM_A" in page
+    assert "5865, 5845" in page
+    assert "MIN — 25 мВт" in page
+    assert "AUX 5" in page
+    assert "Пустых строк: 1" in page
+    assert "Имя пилота: 505140" in page
+    assert "Частота видео, МГц: 5880" in page
+    assert "Подписей на экране очков сдвинуто: 1" in page
+    assert "osd_rssi_pos" not in page
 
 
 def test_evidence_file_lists_the_hash(tmp_path: Path):
