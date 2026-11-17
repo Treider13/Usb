@@ -20,7 +20,13 @@ _BOARD = re.compile(r"^board_name\s+(\S+)\s*$", re.IGNORECASE)
 _MCU = re.compile(r"^mcu_id\s+(\S+)\s*$", re.IGNORECASE)
 _VERSION = re.compile(r"^#\s*(Betaflight|INAV|Cleanflight)\b.*$", re.IGNORECASE)
 _FEATURE = re.compile(r"^feature\s+(-?)([A-Za-z0-9_]+)\s*$", re.IGNORECASE)
-_SECTION = re.compile(r"^(master|profile|rateprofile|battery_profile|pid_profile)\b", re.IGNORECASE)
+# INAV names the same switch `control_profile` and `mixer_profile`.
+# Betaflight uses `profile` and `rateprofile`. The line only selects
+# which block the following `set` lines belong to.
+_SECTION = re.compile(
+    r"^(master|profile|rateprofile|battery_profile|pid_profile|control_profile|mixer_profile)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass

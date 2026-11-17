@@ -316,8 +316,15 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         _rcin_interval(card, rows)
 
 
+# printConfig emits these on every `diff all`, whether or not a setting changed.
+# Betaflight: batch, `defaults nosave`, board_name, manufacturer_id, mcu_id,
+# signature, profile switches, `save`. INAV: the same role for `defaults noreboot`,
+# control_profile / mixer_profile switches and `save`.
+_DIFF_FRAME = {"batch", "defaults", "save", "manufacturer_id", "signature"}
+
+
 def _cli_diff(card: Card, text: str) -> None:
-    """Keep every printed difference. `batch start` is the frame, not a change."""
+    """Keep printed differences. The diff all frame is not a change."""
     parsed = parse_dump(text)
     body: dict = {}
     settings: dict[str, str] = {}
@@ -351,7 +358,7 @@ def _cli_diff(card: Card, text: str) -> None:
         body["vtx"] = parsed.vtx
     lines: list[str] = []
     for name, rows in parsed.commands.items():
-        if name == "batch":
+        if name in _DIFF_FRAME:
             continue
         lines.extend(rows)
     if lines:
@@ -363,7 +370,11 @@ def _cli_diff(card: Card, text: str) -> None:
     shown: object = settings if list(body) == ["set"] else body
     card.put(
         "cli_diff",
-        confirmed(shown, "diff all", "всё, что diff all напечатал, кроме комментариев и batch start/end"),
+        confirmed(
+            shown,
+            "diff all",
+            "строки отличий. Рамка diff all — batch, defaults, save, board_name, manufacturer_id, mcu_id, signature и пустое переключение профиля — не отличие",
+        ),
     )
 
 

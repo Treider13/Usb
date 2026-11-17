@@ -35,7 +35,9 @@ def test_inav_wp_uses_the_cli_line_and_skips_empty_slots():
     assert points[0]["lon"] == 24.5454545
     assert points[0]["alt_cm"] == 5000
     assert points[0]["flag_name"] == "LAST"
-    assert "valid" in note
+    assert "напечатал #wp 1 valid" in note
+    _invalid, invalid_note = parse_inav_wp("#wp 1 invalid\nwp 0 1 10000000 20000000 100 0 0 0 0\n")
+    assert invalid_note.startswith("INAV напечатал #wp invalid")
     card = assemble(Inputs(banner="INAV 7.1.0", wp_text=WP))
     assert card.fields["inav_waypoints"].value[0]["action_name"] == "WAYPOINT"
     assert card.fields["mission_file_source"].value == "inav wp"
@@ -53,8 +55,54 @@ def test_diff_all_keeps_only_the_printed_settings():
 
 
 def test_empty_diff_is_a_confirmed_absence():
-    card = assemble(Inputs(banner="Betaflight 4.5.0", diff_text="# diff all\nbatch start\nbatch end\n"))
-    assert card.fields["cli_diff"].value == "нет отличий"
+    # The frame is what Betaflight and INAV print on every `diff all`.
+    betaflight = "\n".join(
+        [
+            "# diff all",
+            "# Betaflight / STM32F405 4.5.0",
+            "batch start",
+            "defaults nosave",
+            "board_name MATEKF405",
+            "manufacturer_id MTKS",
+            "mcu_id 0032001e",
+            "signature aabb",
+            "profile 0",
+            "rateprofile 0",
+            "battery_profile 0",
+            "profile 0",
+            "save",
+        ]
+    )
+    inav = "\n".join(
+        [
+            "# diff all",
+            "# INAV/MATEKF405 7.1.0",
+            "batch start",
+            "defaults noreboot",
+            "control_profile 1",
+            "mixer_profile 1",
+            "battery_profile 1",
+            "control_profile 1",
+            "mixer_profile 1",
+            "battery_profile 1",
+            "save",
+        ]
+    )
+    assert assemble(Inputs(banner="Betaflight 4.5.0", diff_text=betaflight)).fields["cli_diff"].value == "нет отличий"
+    assert assemble(Inputs(banner="INAV 7.1.0", diff_text=inav)).fields["cli_diff"].value == "нет отличий"
+
+
+def test_inav_profile_set_stays_with_its_profile():
+    text = "\n".join(
+        [
+            "defaults noreboot",
+            "control_profile 2",
+            "set nav_fw_cruise_thr = 1400",
+            "save",
+        ]
+    )
+    card = assemble(Inputs(banner="INAV 7.1.0", diff_text=text))
+    assert card.fields["cli_diff"].value == {"control_profile 2.nav_fw_cruise_thr": "1400"}
 
 
 def test_diff_keeps_feature_resource_and_aux_not_only_set():
