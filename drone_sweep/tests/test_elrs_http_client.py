@@ -57,6 +57,35 @@ def test_empty_esp_reply_is_retried_then_config_is_read():
     assert drops["n"] == 1
 
 
+def test_silent_host_fails_fast_on_config_only():
+    import time
+
+    def handler(conn: socket.socket) -> None:
+        try:
+            conn.recv(4096)
+            time.sleep(5)
+        finally:
+            conn.close()
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.listen(8)
+    stop = threading.Event()
+    threading.Thread(target=_serve, args=(sock, handler, stop), daemon=True).start()
+    started = time.monotonic()
+    try:
+        fetch_pages(f"http://127.0.0.1:{port}", timeout=0.4)
+    except OSError:
+        elapsed = time.monotonic() - started
+    else:
+        raise AssertionError("тихий хост должен оборвать чтение /config")
+    finally:
+        stop.set()
+        sock.close()
+    assert elapsed < 3
+
+
 def test_esp_401_stops_like_the_web_ui_password_prompt():
     def handler(conn: socket.socket) -> None:
         try:

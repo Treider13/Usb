@@ -114,8 +114,15 @@ def capture_drone(form: dict[str, str]) -> DroneCapture:
                 notes=" ".join(notes),
                 error="WebUI сменил пароль — укажите его в поле ниже или снимите .bin с приёмника",
             )
-        except OSError as exc:
-            return DroneCapture(notes=" ".join(notes), error=str(exc))
+        except OSError:
+            return DroneCapture(
+                notes=" ".join(notes),
+                error=(
+                    f"Нет ответа от {base}/config. Компьютер должен быть в Wi‑Fi точке приёмника "
+                    "(сеть ELRS, адрес обычно http://10.0.0.1). Откройте этот адрес в браузере: "
+                    "если там пусто, приёмник не в режиме Wi‑Fi."
+                ),
+            )
 
     if dump_text is None and radio_json is None:
         if not port and not base:

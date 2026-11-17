@@ -37,11 +37,26 @@ def _join(base: str, path: str) -> str:
     return base.rstrip("/") + path
 
 
-def fetch_pages(base: str, opener: Callable[..., Any] | None = None, timeout: float = 5.0) -> dict[str, Any]:
-    """GET the three read endpoints. A 401 stops the session."""
+def fetch_pages(base: str, opener: Callable[..., Any] | None = None, timeout: float = 2.0) -> dict[str, Any]:
+    """Сначала /config, как loadJSON в WebUI. Если его нет, остальные адреса не трогаем."""
     fetch = opener or _open
     pages: dict[str, Any] = {}
+    config_url = _join(base, "/config")
+    try:
+        payload = fetch(config_url, timeout=timeout)
+    except HTTPError as exc:
+        if exc.code == 401:
+            raise RadioAuthRequired(config_url) from exc
+        pages["/config"] = None
+        return pages
+    if isinstance(payload, (bytes, str)):
+        text = payload.decode("utf-8") if isinstance(payload, bytes) else payload
+        pages["/config"] = json.loads(text) if text.strip() else None
+    else:
+        pages["/config"] = payload
     for path in READ_PATHS:
+        if path == "/config":
+            continue
         if path in FORBIDDEN_PATHS:
             raise RuntimeError(path)
         url = _join(base, path)
@@ -50,6 +65,9 @@ def fetch_pages(base: str, opener: Callable[..., Any] | None = None, timeout: fl
         except HTTPError as exc:
             if exc.code == 401:
                 raise RadioAuthRequired(url) from exc
+            pages[path] = None
+            continue
+        except OSError:
             pages[path] = None
             continue
         if isinstance(payload, (bytes, str)):
@@ -81,7 +99,7 @@ def _browser_get(url: str, timeout: float, password: str = "") -> tuple[int, byt
         connection.close()
 
 
-def _open_with_retries(url: str, timeout: float, password: str = "", attempts: int = 5) -> bytes:
+def _open_with_retries(url: str, timeout: float, password: str = "", attempts: int = 2) -> bytes:
     """Повтор, если модуль закрыл сокет. В браузере это то же самое, что обновить страницу."""
     last: Exception | None = None
     for _ in range(attempts):
@@ -113,7 +131,7 @@ def fetch_pages_with_passwords(
     base: str,
   *,
     passwords: tuple[str, ...] | None = None,
-    timeout: float = 8.0,
+    timeout: float = 2.0,
 ) -> tuple[dict[str, Any], str]:
     """Читает WebUI. Сначала пароль из формы, затем заводские."""
     tried: list[str] = []
