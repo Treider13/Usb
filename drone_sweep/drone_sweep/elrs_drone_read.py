@@ -7,15 +7,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from .assemble import Inputs, assemble
-from .elrs_assemble import BINDING_UID_PROTOCOLS
 from .elrs_binding import parse_uid_field
+from .dump_elrs import public_extraction_summary
 from .elrs_http import RadioAuthRequired, DEFAULT_RX_WIFI_PASSWORDS, fetch_pages_with_passwords, normalize_pages
 from .strela_bootstrap import search_binding_installed
 from .usb_read import ReadOnlyError, read_usb
-
-DEFAULT_RADIO_BASE = "http://10.0.0.1"
-
 
 def _password_candidates(form: dict[str, str]) -> tuple[str, ...]:
     entered = form.get("wifi_password", "").strip()
@@ -35,12 +31,8 @@ def _wants_radio_read(form: dict[str, str]) -> bool:
 
 
 def _effective_radio_base(form: dict[str, str]) -> str:
-    base = form.get("radio_base", "").strip()
-    if base:
-        return base
-    if _wants_radio_read(form):
-        return DEFAULT_RADIO_BASE
-    return ""
+    """Только адрес, который вписали. 10.0.0.1 сами не открываем: фразу CIRCL берёт из байтов."""
+    return form.get("radio_base", "").strip()
 
 
 def synthesize_flash_bytes(radio_json: dict) -> bytes:
@@ -146,48 +138,78 @@ def capture_drone_flash_bytes(form: dict[str, str]) -> tuple[bytes | None, str, 
     return cap.flash_bytes, cap.notes, cap.error
 
 
+def _blobs_from_capture(cap: DroneCapture) -> list[bytes]:
+    blobs: list[bytes] = []
+    if cap.flash_bytes:
+        blobs.append(cap.flash_bytes)
+    if cap.dump_text:
+        blobs.append(cap.dump_text.encode("utf-8", "replace"))
+    return blobs
+
+
+def _first_extracted(blobs: list[bytes]) -> tuple[str | None, str | None, str | None]:
+    """CIRCL dump_elrs по снятым байтам: uid, фраза если она в JSON, wifi-password."""
+    uid_text = None
+    phrase = None
+    wifi = None
+    for blob in blobs:
+        summary = public_extraction_summary(blob, reveal_wifi_password=True)
+        for item in summary.get("extracted") or []:
+            if uid_text is None and isinstance(item.get("uid"), str) and item["uid"].strip():
+                uid_text = item["uid"].strip()
+            if phrase is None and isinstance(item.get("binding_phrase"), str) and item["binding_phrase"].strip():
+                phrase = item["binding_phrase"].strip()
+            if wifi is None and isinstance(item.get("wifi_password"), str) and item["wifi_password"].strip():
+                wifi = item["wifi_password"].strip()
+    return uid_text, phrase, wifi
+
+
 def read_drone_elrs_html(
     form: dict[str, str],
     *,
     source_id: str = "all",
 ) -> tuple[bool, str, str]:
-    """USB и/или WebUI модуля → UID → binding phrase (без заранее известного пароля Wi‑Fi)."""
+    """USB-дамп полётника → dump_elrs → словарь по UID. http://10.0.0.1 не открываем."""
     cap = capture_drone(form)
     blocks: list[str] = []
     if cap.notes:
         blocks.append(f"<p>{html.escape(cap.notes)}</p>")
-    if cap.error and cap.radio_json is None and not cap.dump_text:
-        return False, f"<p class='hole'>{html.escape(cap.error)}</p>", ""
+    if cap.error and not cap.dump_text and not cap.flash_bytes:
+        return False, "".join(blocks) + f"<p class='hole'>{html.escape(cap.error)}</p>", ""
 
-    card = assemble(Inputs(dump_text=cap.dump_text, radio_json=cap.radio_json))
-    protocol = card.fields.get("radio_protocol")
-    proto = str(protocol.value) if protocol and protocol.status == "confirmed" else None
-    if proto and proto not in BINDING_UID_PROTOCOLS:
-        return False, f"<p class='hole'>Протокол {html.escape(proto)}: подбор UID только ExpressLRS/MILELRS.</p>", ""
-
-    uid_field = card.fields.get("radio_uid")
-    if uid_field is None or uid_field.status != "confirmed":
+    uid_text, inline_phrase, wifi = _first_extracted(_blobs_from_capture(cap))
+    if wifi:
         blocks.append(
-            "<p class='hole'>Нет UID: питайте приёмник от USB, дождитесь Wi‑Fi «ELRS_*» или загрузите .bin.</p>"
+            "<p class='help'>Пароль WebUI из файла, как CIRCL <code>wifi-password</code>: "
+            f"<code>{html.escape(wifi)}</code>. Им открывают http://10.0.0.1 уже после фразы.</p>"
+        )
+    if inline_phrase:
+        blocks.append(
+            "<article class='panel'><h2>Binding phrase</h2>"
+            f"<p class='value-big'><code>{html.escape(inline_phrase)}</code></p>"
+            "<p class='help'>Фраза была в JSON с борта. Словарь не понадобился.</p></article>"
+        )
+        return True, "".join(blocks), uid_text or ""
+    if not uid_text:
+        blocks.append(
+            "<p class='hole'>В данных с USB нет JSON <code>uid</code>. "
+            "CIRCL достаёт его из образа приёмника (.bin), а не из текста dump all полётника. "
+            "Положите файл приёмника в форму выше.</p>"
         )
         return False, "".join(blocks), ""
-
-    uid_text = str(uid_field.value)
     try:
         uid = parse_uid_field(uid_text)
     except ValueError as exc:
-        return False, f"<p class='hole'>{html.escape(str(exc))}</p>", uid_text
-
+        return False, "".join(blocks) + f"<p class='hole'>{html.escape(str(exc))}</p>", uid_text
     phrase, used, problem = search_binding_installed(uid, source_id)
-    body = "".join(blocks)
-    body += f"<p>UID: <code>{html.escape(uid_text)}</code></p>"
+    blocks.append(f"<p>UID из dump_elrs: <code>{html.escape(uid_text)}</code></p>")
     if phrase:
-        body += (
+        blocks.append(
             "<article class='panel'><h2>Binding phrase</h2>"
             f"<p class='value-big'><code>{html.escape(phrase)}</code></p>"
-            f"<p class='help'>Источник: {html.escape(used)}. Пароль Wi‑Fi WebUI для подбора не нужен.</p></article>"
+            f"<p class='help'>Словарь CIRCL: {html.escape(used)}.</p></article>"
         )
-        return True, body, uid_text
+        return True, "".join(blocks), uid_text
     detail = problem or "фраза не найдена — выполните strela setup"
-    body += f"<p class='hole'>{html.escape(detail)}</p>"
-    return False, body, uid_text
+    blocks.append(f"<p class='hole'>{html.escape(detail)}</p>")
+    return False, "".join(blocks), uid_text
