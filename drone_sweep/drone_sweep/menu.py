@@ -10,7 +10,7 @@ from .assemble import Inputs, assemble
 from .elrs_http import RadioAuthRequired, fetch_pages, normalize_pages
 from .hints import WORKFLOW
 from .report import render_html
-from .usb_read import ReadOnlyError, assert_readonly_cli, describe_ports, read_usb
+from .usb_read import ReadOnlyError, assert_readonly_cli, describe_ports, port_open_error, read_usb
 
 
 APP_NAME = "Стрела"
@@ -160,7 +160,8 @@ def run_menu(
             try:
                 card_inputs = read_usb(picked, port_opener=port_opener)
             except (OSError, ReadOnlyError, ValueError) as exc:
-                say(f"Порт не ответил: {exc}. Карточка из пустого ответа не собрана.")
+                detail = port_open_error(picked, exc) if isinstance(exc, OSError) else str(exc)
+                say(f"Порт не ответил: {detail} Карточка не собрана.")
                 continue
             dump_text = card_inputs.dump_text or ""
             if card_inputs.mavlink_rows is None and "betaflight" not in dump_text.lower() and "inav" not in dump_text.lower() and "cleanflight" not in dump_text.lower():

@@ -137,7 +137,7 @@ class StrelaHandler(BaseHTTPRequestHandler):
         self._send(200, render_html(card, saved_path=str(saved)).encode("utf-8"))
 
     def _read_usb(self, form: dict[str, str]) -> None:
-        from .usb_read import ReadOnlyError, read_usb
+        from .usb_read import ReadOnlyError, port_open_error, read_usb
 
         picked = form.get("port", "").strip()
         folder = form.get("out", "").strip()
@@ -147,7 +147,8 @@ class StrelaHandler(BaseHTTPRequestHandler):
         try:
             card = assemble(read_usb(picked))
         except (OSError, ReadOnlyError, ValueError) as exc:
-            body = page("Порт не ответил", f"<h1>Порт не ответил</h1><p>{html.escape(str(exc))}</p><p>Карточка не собрана.</p><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8")
+            detail = port_open_error(picked, exc) if isinstance(exc, OSError) else str(exc)
+            body = page("Порт не ответил", f"<h1>Порт не ответил</h1><p>{html.escape(detail)}</p><p>Карточка не собрана.</p><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8")
             self._send(400, body)
             return
         saved = write_report(card, Path(folder))

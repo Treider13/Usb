@@ -172,6 +172,19 @@ class QuietPort:
             self.idle_s, self.overall_s = saved
 
 
+def port_open_error(path: str, exc: OSError) -> str:
+    """Plain reason when the serial device exists but this user cannot open it."""
+    denied = isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 13
+    if denied and path.startswith("/dev/tty"):
+        return (
+            f"Нет права открыть {path}. На Linux этот порт принадлежит группе dialout. "
+            "Выполните sudo usermod -aG dialout \"$USER\", полностью выйдите из системы и войдите снова. "
+            "До нового входа можно открыть текущий порт командой sudo chmod a+rw "
+            f"{path}. Затем снова нажмите «Считать»."
+        )
+    return str(exc)
+
+
 def open_betaflight_port(path: str, overall_s: float = 90.0) -> QuietPort:
     import serial
 

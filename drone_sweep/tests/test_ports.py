@@ -165,6 +165,16 @@ def _variant_frame(token: bytes) -> bytes:
     return bytes([ord("$"), ord("M"), ord(">"), len(token), MSP_FC_VARIANT]) + token + bytes([checksum])
 
 
+def test_permission_denied_names_the_dialout_group():
+    from drone_sweep.usb_read import port_open_error
+
+    text = port_open_error("/dev/ttyACM0", PermissionError(13, "Permission denied"))
+    assert "dialout" in text
+    assert "usermod -aG dialout" in text
+    assert "/dev/ttyACM0" in text
+    assert "dialout" not in port_open_error("COM3", PermissionError(13, "Permission denied"))
+
+
 def test_version_text_names_a_board_left_in_the_cli():
     from drone_sweep.usb_read import family_in_text
 
