@@ -1,38 +1,46 @@
-"""Чтение ELRS/MILELRS с борта: USB полётник + Wi‑Fi модуль при питании."""
+"""Чтение ELRS/MILELRS с борта: USB полётник + Wi‑Fi модуля при питании."""
 
 from __future__ import annotations
 
 import html
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from .assemble import Inputs, assemble
 from .elrs_assemble import BINDING_UID_PROTOCOLS
 from .elrs_binding import parse_uid_field
-from .elrs_http import RadioAuthRequired, fetch_pages, normalize_pages
+from .elrs_http import RadioAuthRequired, DEFAULT_RX_WIFI_PASSWORDS, fetch_pages_with_passwords, normalize_pages
 from .strela_bootstrap import search_binding_installed
 from .usb_read import ReadOnlyError, read_usb
 
+DEFAULT_RADIO_BASE = "http://10.0.0.1"
 
-def _fetch_radio(base: str, wifi_password: str) -> dict:
-    from base64 import b64encode
-    from urllib.error import HTTPError
-    from urllib.request import Request, urlopen
 
-    def opener(url: str, timeout: float = 8.0) -> bytes:
-        request = Request(url, method="GET")
-        if wifi_password:
-            token = b64encode(f":{wifi_password}".encode("ascii", errors="ignore")).decode("ascii")
-            request.add_header("Authorization", f"Basic {token}")
-        with urlopen(request, timeout=timeout) as response:
-            return response.read()
+def _password_candidates(form: dict[str, str]) -> tuple[str, ...]:
+    entered = form.get("wifi_password", "").strip()
+    if entered:
+        return (entered, *DEFAULT_RX_WIFI_PASSWORDS)
+    return DEFAULT_RX_WIFI_PASSWORDS
 
-    try:
-        return fetch_pages(base, opener=opener)
-    except HTTPError as exc:
-        if exc.code == 401:
-            raise RadioAuthRequired(base) from exc
-        raise
+
+def _wants_radio_read(form: dict[str, str]) -> bool:
+    if form.get("radio_base", "").strip():
+        return True
+    if form.get("drone_port", "").strip():
+        return True
+    if form.get("flash_source", "").strip() == "drone":
+        return True
+    return form.get("action", "").strip() == "read_drone"
+
+
+def _effective_radio_base(form: dict[str, str]) -> str:
+    base = form.get("radio_base", "").strip()
+    if base:
+        return base
+    if _wants_radio_read(form):
+        return DEFAULT_RADIO_BASE
+    return ""
 
 
 def synthesize_flash_bytes(radio_json: dict) -> bytes:
@@ -40,6 +48,30 @@ def synthesize_flash_bytes(radio_json: dict) -> bytes:
     payload = dict(radio_json)
     if isinstance(payload.get("uid"), str) and "," in str(payload["uid"]):
         payload["uid"] = [int(part) for part in str(payload["uid"]).split(",")]
+    return b"\xff\xff" + json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def synthesize_flash_bytes_from_pages(pages: dict[str, Any]) -> bytes:
+    """Полный config приёмника (uid, wifi-password, binding-phrase) для dump_elrs."""
+    body = pages.get("/config") or {}
+    if not isinstance(body, dict):
+        body = {}
+    payload: dict[str, Any] = dict(body.get("config") or {})
+    normalized = normalize_pages(pages)
+    uid = normalized.get("uid")
+    if uid and "uid" not in payload:
+        if isinstance(uid, str) and "," in uid:
+            payload["uid"] = [int(part) for part in uid.split(",")]
+        else:
+            payload["uid"] = uid
+    for key in ("wifi-ssid", "wifi-password", "binding-phrase", "binding_phrase"):
+        if key in body and key not in payload:
+            payload[key] = body[key]
+    cfg = body.get("config")
+    if isinstance(cfg, dict):
+        for key in ("wifi-ssid", "wifi-password", "binding-phrase"):
+            if key in cfg and key not in payload:
+                payload[key] = cfg[key]
     return b"\xff\xff" + json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
@@ -54,8 +86,7 @@ class DroneCapture:
 
 def capture_drone(form: dict[str, str]) -> DroneCapture:
     port = form.get("drone_port", "").strip()
-    base = (form.get("radio_base") or "").strip()
-    wifi_password = form.get("wifi_password", "").strip()
+    base = _effective_radio_base(form)
     notes: list[str] = []
     dump_text: str | None = None
     radio_json: dict | None = None
@@ -74,18 +105,21 @@ def capture_drone(form: dict[str, str]) -> DroneCapture:
 
     if base:
         try:
-            pages = _fetch_radio(base, wifi_password)
+            pages, auth_note = fetch_pages_with_passwords(base, passwords=_password_candidates(form))
             radio_json = normalize_pages(pages)
-            flash_bytes = synthesize_flash_bytes(radio_json)
-            notes.append("Модуль по Wi‑Fi: конфиг прочитан.")
+            flash_bytes = synthesize_flash_bytes_from_pages(pages)
+            notes.append(f"Модуль по Wi‑Fi ({auth_note}): конфиг прочитан.")
         except RadioAuthRequired:
-            return DroneCapture(notes=" ".join(notes), error="нужен пароль Wi‑Fi WebUI (часто expresslrs)")
+            return DroneCapture(
+                notes=" ".join(notes),
+                error="WebUI сменил пароль — укажите его в поле ниже или снимите .bin с приёмника",
+            )
         except OSError as exc:
             return DroneCapture(notes=" ".join(notes), error=str(exc))
 
     if dump_text is None and radio_json is None:
         if not port and not base:
-            return DroneCapture(error="выберите USB-порт и/или укажите адрес Wi‑Fi модуля")
+            return DroneCapture(error="выберите USB-порт или подключите приёмник (Wi‑Fi точка ELRS RX)")
         return DroneCapture(error="чтение не дало данных")
 
     return DroneCapture(
@@ -100,8 +134,8 @@ def capture_drone_flash_bytes(form: dict[str, str]) -> tuple[bytes | None, str, 
     cap = capture_drone(form)
     if cap.error and cap.flash_bytes is None:
         return None, cap.notes, cap.error
-    if cap.flash_bytes is None and cap.dump_text and "expresslrs" not in (cap.dump_text or "").lower():
-        return None, cap.notes, "в USB-дампе нет expresslrs — включите Wi‑Fi на приёмнике или загрузите .bin"
+    if cap.flash_bytes is None:
+        return None, cap.notes, "UID на приёмнике — включите Wi‑Fi точку RX (ELRS) при питании с USB или загрузите .bin"
     return cap.flash_bytes, cap.notes, cap.error
 
 
@@ -110,18 +144,12 @@ def read_drone_elrs_html(
     *,
     source_id: str = "all",
 ) -> tuple[bool, str, str]:
-    """USB и/или WebUI модуля → UID → binding phrase."""
+    """USB и/или WebUI модуля → UID → binding phrase (без заранее известного пароля Wi‑Fi)."""
     cap = capture_drone(form)
     blocks: list[str] = []
     if cap.notes:
         blocks.append(f"<p>{html.escape(cap.notes)}</p>")
     if cap.error and cap.radio_json is None and not cap.dump_text:
-        if "пароль" in cap.error.lower():
-            return (
-                False,
-                "<p class='hole'>Модуль просит пароль Wi‑Fi (часто <code>expresslrs</code>). Введите в поле ниже.</p>",
-                "",
-            )
         return False, f"<p class='hole'>{html.escape(cap.error)}</p>", ""
 
     card = assemble(Inputs(dump_text=cap.dump_text, radio_json=cap.radio_json))
@@ -133,7 +161,7 @@ def read_drone_elrs_html(
     uid_field = card.fields.get("radio_uid")
     if uid_field is None or uid_field.status != "confirmed":
         blocks.append(
-            "<p class='hole'>В чтении нет UID. Включите Wi‑Fi ExpressLRS RX, задайте пароль WebUI или загрузите .bin.</p>"
+            "<p class='hole'>Нет UID: питайте приёмник от USB, дождитесь Wi‑Fi «ELRS_*» или загрузите .bin.</p>"
         )
         return False, "".join(blocks), ""
 
@@ -150,9 +178,9 @@ def read_drone_elrs_html(
         body += (
             "<article class='panel'><h2>Binding phrase</h2>"
             f"<p class='value-big'><code>{html.escape(phrase)}</code></p>"
-            f"<p class='help'>Источник: {html.escape(used)}</p></article>"
+            f"<p class='help'>Источник: {html.escape(used)}. Пароль Wi‑Fi WebUI для подбора не нужен.</p></article>"
         )
         return True, body, uid_text
-    detail = problem or "фраза не найдена"
+    detail = problem or "фраза не найдена — выполните strela setup"
     body += f"<p class='hole'>{html.escape(detail)}</p>"
     return False, body, uid_text

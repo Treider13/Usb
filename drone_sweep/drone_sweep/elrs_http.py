@@ -23,6 +23,10 @@ class RadioAuthRequired(Exception):
     """The page asked for a password. One prompt, no retries."""
 
 
+# Заводской WebUI ExpressLRS RX; при чтении с борта пробуем по очереди.
+DEFAULT_RX_WIFI_PASSWORDS: tuple[str, ...] = ("", "expresslrs")
+
+
 def _join(base: str, path: str) -> str:
     return base.rstrip("/") + path
 
@@ -54,6 +58,41 @@ def _open(url: str, timeout: float = 5.0) -> bytes:
     request = Request(url, method="GET")
     with urlopen(request, timeout=timeout) as response:
         return response.read()
+
+
+def _opener_for_password(password: str, timeout: float = 8.0) -> Callable[..., Any]:
+    from base64 import b64encode
+
+    def opener(url: str, timeout: float = timeout) -> bytes:
+        request = Request(url, method="GET")
+        if password:
+            token = b64encode(f":{password}".encode("ascii", errors="ignore")).decode("ascii")
+            request.add_header("Authorization", f"Basic {token}")
+        with urlopen(request, timeout=timeout) as response:
+            return response.read()
+
+    return opener
+
+
+def fetch_pages_with_passwords(
+    base: str,
+  *,
+    passwords: tuple[str, ...] | None = None,
+    timeout: float = 8.0,
+) -> tuple[dict[str, Any], str]:
+    """Читает WebUI. Сначала пароль из формы, затем заводские."""
+    tried: list[str] = []
+    for password in passwords or DEFAULT_RX_WIFI_PASSWORDS:
+        if password in tried:
+            continue
+        tried.append(password)
+        try:
+            pages = fetch_pages(base, opener=_opener_for_password(password, timeout=timeout), timeout=timeout)
+        except RadioAuthRequired:
+            continue
+        note = "без пароля" if not password else f"пароль «{password}»"
+        return pages, note
+    raise RadioAuthRequired(base)
 
 
 def normalize_pages(pages: dict[str, Any]) -> dict[str, Any]:
