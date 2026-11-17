@@ -24,8 +24,77 @@ def _field_name(value: object) -> str:
     return "" if value is None else str(value)
 
 
+def _boundary(content_type: str) -> bytes | None:
+    for piece in content_type.split(";")[1:]:
+        piece = piece.strip()
+        if not piece.lower().startswith("boundary="):
+            continue
+        value = piece.split("=", 1)[1].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        if value:
+            return value.encode("utf-8", "surrogateescape")
+    return None
+
+
+def _multipart_form_split(content_type: str, body: bytes) -> tuple[dict[str, str], dict[str, Uploaded]]:
+    """Запасной разбор, если email.parser не принял тело от браузера."""
+    boundary = _boundary(content_type)
+    if boundary is None:
+        return {}, {}
+    fields: dict[str, str] = {}
+    files: dict[str, Uploaded] = {}
+    for chunk in body.split(b"--" + boundary)[1:]:
+        if chunk.startswith(b"--"):
+            break
+        if chunk.startswith(b"\r\n"):
+            chunk = chunk[2:]
+        elif chunk.startswith(b"\n"):
+            chunk = chunk[1:]
+        if chunk.endswith(b"\r\n"):
+            chunk = chunk[:-2]
+        header_blob, sep, payload = chunk.partition(b"\r\n\r\n")
+        if not sep:
+            header_blob, sep, payload = chunk.partition(b"\n\n")
+        if not sep:
+            continue
+        name = ""
+        filename = ""
+        for line in header_blob.decode("utf-8", "replace").splitlines():
+            if not line.lower().startswith("content-disposition:"):
+                continue
+            for param in line.split(":")[1].split(";"):
+                param = param.strip()
+                if "=" not in param:
+                    continue
+                key, val = param.split("=", 1)
+                val = val.strip().strip('"')
+                if key.strip().lower() == "name":
+                    name = val
+                elif key.strip().lower() == "filename":
+                    filename = val
+        if not name:
+            continue
+        if filename:
+            if payload:
+                files[name] = Uploaded(filename, payload)
+        else:
+            fields[name] = payload.decode("utf-8", "replace")
+    return fields, files
+
+
 def _multipart_form(content_type: str, body: bytes) -> tuple[dict[str, str], dict[str, Uploaded]]:
     """multipart/form-data без модуля cgi (его нет в Python 3.13+)."""
+    try:
+        fields, files = _multipart_form_email(content_type, body)
+    except Exception:
+        return _multipart_form_split(content_type, body)
+    if not fields and not files and b"content-disposition:" in body.lower():
+        return _multipart_form_split(content_type, body)
+    return fields, files
+
+
+def _multipart_form_email(content_type: str, body: bytes) -> tuple[dict[str, str], dict[str, Uploaded]]:
     header = f"Content-Type: {content_type}\r\n\r\n".encode("utf-8", "surrogateescape")
     message = BytesParser(policy=HTTP).parsebytes(header + body)
     fields: dict[str, str] = {}
