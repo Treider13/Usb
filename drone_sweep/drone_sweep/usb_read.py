@@ -172,6 +172,20 @@ class QuietPort:
             self.idle_s, self.overall_s = saved
 
 
+def port_open_error(path: str, exc: OSError) -> str:
+    """Plain reason when the serial device exists but this user cannot open it."""
+    denied = isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 13
+    if denied and path.startswith("/dev/tty"):
+        return (
+            f"Нет права открыть {path}. Это не команда, её не нужно вставлять в терминал. "
+            "Конфигуратор Betaflight для этого добавляет пользователя в группу dialout. "
+            "Конфигуратор INAV ставит правило udev с правами 0666 для STM32 VCP 0483:5740. "
+            "Выполните в папке программы: sudo .venv/bin/strela allow-usb "
+            "Затем снова нажмите «Считать»."
+        )
+    return str(exc)
+
+
 def open_betaflight_port(path: str, overall_s: float = 90.0) -> QuietPort:
     import serial
 

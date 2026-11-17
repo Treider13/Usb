@@ -165,6 +165,34 @@ def _variant_frame(token: bytes) -> bytes:
     return bytes([ord("$"), ord("M"), ord(">"), len(token), MSP_FC_VARIANT]) + token + bytes([checksum])
 
 
+def test_permission_denied_names_the_dialout_group():
+    from drone_sweep.usb_read import port_open_error
+
+    text = port_open_error("/dev/ttyACM0", PermissionError(13, "Permission denied"))
+    assert "dialout" in text
+    assert "allow-usb" in text
+    assert "0483:5740" in text
+    assert "/dev/ttyACM0" in text
+    assert "dialout" not in port_open_error("COM3", PermissionError(13, "Permission denied"))
+
+
+def test_udev_rule_matches_the_serial_ids_and_skips_the_dfu_bootloader(tmp_path: Path):
+    from drone_sweep.usb_access import SERIAL_IDS, rules_text, usb_ids
+
+    text = rules_text()
+    for vendor, product in SERIAL_IDS:
+        assert f'idVendor}}=="{vendor}"' in text
+        assert f'idProduct}}=="{product}"' in text
+    assert "df11" not in text
+    assert 'SUBSYSTEM=="tty"' in text
+    device = tmp_path / "1-1:1.0"
+    usb = tmp_path
+    device.mkdir()
+    (usb / "idVendor").write_text("0483\n", encoding="ascii")
+    (usb / "idProduct").write_text("5740\n", encoding="ascii")
+    assert usb_ids(device) == ("0483", "5740")
+
+
 def test_version_text_names_a_board_left_in_the_cli():
     from drone_sweep.usb_read import family_in_text
 

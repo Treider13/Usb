@@ -10,7 +10,7 @@ from .assemble import Inputs, assemble
 from .elrs_http import RadioAuthRequired, fetch_pages, normalize_pages
 from .hints import WORKFLOW
 from .report import render_html
-from .usb_read import ReadOnlyError, assert_readonly_cli, describe_ports, read_usb
+from .usb_read import ReadOnlyError, assert_readonly_cli, describe_ports, port_open_error, read_usb
 
 
 APP_NAME = "Стрела"
@@ -160,7 +160,8 @@ def run_menu(
             try:
                 card_inputs = read_usb(picked, port_opener=port_opener)
             except (OSError, ReadOnlyError, ValueError) as exc:
-                say(f"Порт не ответил: {exc}. Карточка из пустого ответа не собрана.")
+                detail = port_open_error(picked, exc) if isinstance(exc, OSError) else str(exc)
+                say(f"Порт не ответил: {detail} Карточка не собрана.")
                 continue
             dump_text = card_inputs.dump_text or ""
             if card_inputs.mavlink_rows is None and "betaflight" not in dump_text.lower() and "inav" not in dump_text.lower() and "cleanflight" not in dump_text.lower():
@@ -213,6 +214,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _dispatch(args: list[str]) -> int:
+    if args and args[0] == "allow-usb":
+        from .usb_access import install_usb_access
+
+        return install_usb_access(sys.argv[0])
     if args and args[0] == "serve":
         from .webapp import ServeError, serve
 
@@ -248,7 +253,7 @@ def _dispatch(args: list[str]) -> int:
             return 2
         return 0
     print(explain_text())
-    print("Команды: strela, strela explain, strela serve --port 8765, strela assemble ...")
+    print("Команды: strela, strela explain, strela serve --port 8765, strela allow-usb, strela assemble ...")
     return 1
 
 
