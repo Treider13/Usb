@@ -702,9 +702,43 @@ def _absorb_mavlink(card: Card, rows: list[dict], source: str = "tlog") -> None:
         if name:
             params[name] = _plain(row.get("param_value"))
     if params and (card.fields.get("parameters") is None or card.fields["parameters"].status != "confirmed"):
-        card.put("parameters", confirmed(params, f"{source} PARAM_VALUE"))
+        card.put("parameters", confirmed(params, f"{source} PARAM_VALUE", f"прочитано параметров: {len(params)}"))
         _known_params(card, params, source=f"{source} PARAM_VALUE")
         _ardupilot_ports(card, params, source=f"{source} PARAM_VALUE")
+    versions = [row for row in rows if row.get("name") == "AUTOPILOT_VERSION"]
+    if versions:
+        version = versions[0]
+        card.put(
+            "autopilot_version",
+            confirmed(
+                version,
+                f"{source} AUTOPILOT_VERSION",
+                "номер прошивки из flight_sw_version. Старшие 16 бит board_version — это APJ_BOARD_ID.",
+            ),
+        )
+        if version.get("uid2") and "mcu_id" not in card.fields:
+            card.put("mcu_id", confirmed(version["uid2"], f"{source} AUTOPILOT_VERSION", "uid2 из AUTOPILOT_VERSION"))
+        banner = f"{version.get('major')}.{version.get('minor')}.{version.get('patch')}"
+        custom = version.get("flight_custom_version") or ""
+        if custom:
+            banner = f"{banner} {custom}"
+        if not card.raw_banner or card.raw_banner == "MAVLink HEARTBEAT":
+            card.raw_banner = banner
+    texts = [str(row.get("text") or "") for row in rows if row.get("name") == "STATUSTEXT" and row.get("text")]
+    if texts:
+        card.put(
+            "board_messages",
+            confirmed(texts, f"{source} STATUSTEXT", "строки, которые плата сама прислала при чтении"),
+        )
+        named = next((text for text in texts if text.lower().startswith("ardu")), "")
+        if named:
+            card.raw_banner = named
+    logs = [row for row in rows if row.get("name") == "LOG_ENTRY"]
+    if logs:
+        card.put(
+            "dataflash_logs",
+            confirmed(logs, f"{source} LOG_ENTRY", "список журналов на плате. Стирание не отправлялось."),
+        )
     radios = [row for row in rows if row.get("name") == "RADIO_STATUS"]
     if radios:
         kept = {

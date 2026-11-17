@@ -62,7 +62,7 @@ def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
 {usb}
 </header>
 <h2>Подключение по USB</h2>
-<p class="lede">Выберите порт в верхней полосе и нажмите «Считать». Скорость 115200, как в списке конфигуратора. Программа сама отличит Betaflight, INAV, Cleanflight и MAVLink и снимет только чтение.</p>
+<p class="lede">Выберите порт в верхней полосе и нажмите «Считать». Скорость 115200, как в списке конфигуратора. Программа сама отличит Betaflight, INAV, Cleanflight и ArduPilot. С ArduPilot читает версию, все параметры и последний журнал .BIN в папку отчёта. В плату ничего не записывается.</p>
 <div class="actions">
 <a class="action quiet" href="/assemble">Собрать карточку из файлов</a>
 <a class="action quiet" href="/explain">Подсказки</a>
@@ -145,7 +145,7 @@ class StrelaHandler(BaseHTTPRequestHandler):
             self._send(400, page("Нужен порт", "<h1>Выберите USB-порт и папку отчёта</h1><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8"))
             return
         try:
-            card = assemble(read_usb(picked))
+            card = assemble(read_usb(picked, log_dir=folder))
         except (OSError, ReadOnlyError, ValueError) as exc:
             body = page("Порт не ответил", f"<h1>Порт не ответил</h1><p>{html.escape(str(exc))}</p><p>Карточка не собрана.</p><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8")
             self._send(400, body)

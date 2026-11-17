@@ -33,6 +33,7 @@ def test_menu_pages_use_the_same_sheet():
         assert "Liberation Sans" in body
     assert "Собрать карточку" in home
     assert "Подключение по USB" in home
+    assert "журнал .BIN" in home
     assert "Собрать карточку" in form
     assert "dump all" in form
     assert "парол" in explain.lower()

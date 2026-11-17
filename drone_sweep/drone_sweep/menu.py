@@ -149,7 +149,7 @@ def run_menu(
         elif choice == "3":
             ports = list_usb_ports()
             say("Порты: " + (", ".join(ports) if ports else "не найдены. Подключите полётник кабелем USB и откройте меню снова."))
-            say("Кнопка чтения сама отличает Betaflight, INAV, Cleanflight и MAVLink. Сначала MSP или список параметров, для полётника с CLI затем dump all. У Betaflight после дампа уходит exit noreboot: голый exit в cli.c перезагружает плату. У INAV exit вызывает cliReboot, поэтому не отправляется. set, save и serialpassthrough не отправляются.")
+            say("Кнопка чтения сама отличает Betaflight, INAV, Cleanflight и ArduPilot. Сначала MSP или список параметров, для полётника с CLI затем dump all. У ArduPilot запрашиваются версия, параметры и последний журнал .BIN. LOG_ERASE не отправляется, взведение не снимается. У Betaflight после дампа уходит exit noreboot: голый exit в cli.c перезагружает плату. У INAV exit вызывает cliReboot, поэтому не отправляется. set, save и serialpassthrough не отправляются.")
             picked = ask("Путь порта. Enter — не читать.").strip()
             if not picked:
                 continue
@@ -158,7 +158,7 @@ def run_menu(
                 say("Папка отчёта обязательна. Порт не открывался.")
                 continue
             try:
-                card_inputs = read_usb(picked, port_opener=port_opener)
+                card_inputs = read_usb(picked, port_opener=port_opener, log_dir=folder)
             except (OSError, ReadOnlyError, ValueError) as exc:
                 say(f"Порт не ответил: {exc}. Карточка из пустого ответа не собрана.")
                 continue

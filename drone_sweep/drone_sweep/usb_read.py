@@ -3,7 +3,9 @@
 Only read commands are written to the port. `save`, `set`, `defaults`
 and MSP codes that write configuration are rejected before they reach
 the wire. A MAVLink board is identified by HEARTBEAT and read with
-PARAM_REQUEST_LIST. No parameter is written back.
+PARAM_REQUEST_LIST. No parameter is written back. A dataflash log is
+requested with LOG_REQUEST_LIST and LOG_REQUEST_DATA, then closed with
+LOG_REQUEST_END. LOG_ERASE is not sent.
 """
 
 from __future__ import annotations
@@ -219,7 +221,12 @@ def mavlink_heartbeat(buf: bytes) -> dict | None:
 
 
 class SerialMavlink:
-    """PARAM_REQUEST_LIST on a port that is already open. The port is not reopened."""
+    """MAVLink on a port that is already open. The port is not reopened.
+
+    A USB read can hold many PARAM_VALUE or LOG_DATA frames. Every frame in
+    the chunk is queued. Returning the first match and discarding the rest
+    left the card with one parameter.
+    """
 
     def __init__(self, raw, beat: dict | None):
         from pymavlink.dialects.v20 import ardupilotmega as dialect
@@ -228,6 +235,7 @@ class SerialMavlink:
         self.mav = dialect.MAVLink(self, srcSystem=255, srcComponent=190)
         self.target_system = int((beat or {}).get("src_system") or 1)
         self.target_component = int((beat or {}).get("src_component") or 1)
+        self._queue: list = []
 
     def write(self, data: bytes) -> None:
         self.raw.write(data)
@@ -238,16 +246,31 @@ class SerialMavlink:
     def recv_match(self, type=None, blocking=False, timeout=None):
         import time
 
+        wanted = None if type is None else {type} if isinstance(type, str) else set(type)
         deadline = time.monotonic() + (timeout or 0)
-        while time.monotonic() < deadline:
-            chunk = self.raw.read(4096)
-            if not chunk:
-                continue
-            for index in range(len(chunk)):
-                message = self.mav.parse_char(chunk[index:index + 1])
-                if message is not None and message.get_type() == type:
-                    return message
+        while True:
+            found = self._take(wanted)
+            if found is not None:
+                return found
+            if time.monotonic() >= deadline:
+                return None
+            self._pull()
+
+    def _take(self, wanted: set[str] | None):
+        if len(self._queue) > 200:
+            self._queue = [message for message in self._queue if message.get_type() != "HEARTBEAT"]
+        for index, message in enumerate(self._queue):
+            if wanted is None or message.get_type() in wanted:
+                return self._queue.pop(index)
         return None
+
+    def _pull(self) -> None:
+        chunk = self.raw.read(8192)
+        if not chunk:
+            return
+        for message in self.mav.parse_buffer(chunk) or []:
+            if message.get_type() != "BAD_DATA":
+                self._queue.append(message)
 
     def close(self) -> None:
         return None
@@ -255,6 +278,9 @@ class SerialMavlink:
 
 def read_mavlink_parameters(connection) -> tuple[list[dict], str]:
     """PARAM_REQUEST_LIST only. No parameter is written back."""
+    from .ardupilot_read import gcs_heartbeat
+
+    gcs_heartbeat(connection)
     connection.mav.param_request_list_send(connection.target_system, connection.target_component)
     rows: list[dict] = []
     expected: int | None = None
@@ -276,13 +302,17 @@ def read_mavlink_parameters(connection) -> tuple[list[dict], str]:
             return rows, ""
 
 
-def read_usb(path: str, port_opener=None, mavlink_opener=None) -> "Inputs":
+def read_usb(path: str, port_opener=None, mavlink_opener=None, log_dir=None) -> "Inputs":
     """Identify the board the way the Configurator opens a port, then read it.
 
     Betaflight Configurator sends MSP_API_VERSION and then MSP_FC_VARIANT and
-    stops unless the answer is BTFL. Strela keeps INAV and Cleanflight, and a
-    MAVLink HEARTBEAT is read with PARAM_REQUEST_LIST.
+    stops unless the answer is BTFL. Strela keeps INAV and Cleanflight. An
+    ArduPilot board is read with AUTOPILOT_VERSION, PARAM_REQUEST_LIST and,
+    when a folder is given, the newest dataflash log. Nothing is written back.
     """
+    from pathlib import Path
+
+    from .ardupilot_read import drain, read_dataflash, request_autopilot_version, version_row
     from .assemble import Inputs
 
     if port_opener is not None:
@@ -295,14 +325,27 @@ def read_usb(path: str, port_opener=None, mavlink_opener=None) -> "Inputs":
         if kind == "mavlink":
             link = SerialMavlink(port.raw, beat) if mavlink_opener is None else mavlink_opener(path)
             try:
+                request_autopilot_version(link)
                 rows, note = read_mavlink_parameters(link)
+                for message in drain(link, ("AUTOPILOT_VERSION", "STATUSTEXT")):
+                    if message.get_type() == "AUTOPILOT_VERSION":
+                        rows.append(version_row(message))
+                    else:
+                        text = message.text
+                        if isinstance(text, bytes):
+                            text = text.decode("latin1", errors="replace")
+                        rows.append({"name": "STATUSTEXT", "text": str(text).rstrip("\x00").strip()})
+                folder = Path(log_dir) if log_dir else None
+                log_rows, log_path, log_note = read_dataflash(link, folder)
             finally:
                 close = getattr(link, "close", None)
                 if close is not None:
                     close()
+            rows.extend(log_rows)
             if beat:
                 rows.insert(0, {"name": "HEARTBEAT", **beat})
-            return Inputs(mavlink_rows=rows, read_note=note)
+            notes = " ".join(part for part in (note, log_note) if part)
+            return Inputs(mavlink_rows=rows, read_note=notes, bin_path=log_path)
         if kind in {"betaflight", "inav", "cleanflight"}:
             leave, note = cli_leave(kind)
             dump_text, boxes = collect_flight_controller(port, leave_cli=leave)
