@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import html
 
+from .elrs_resources import render_elrs_resources_html
+
 # Учебные приоритеты под домен Стрелы; не разведданные.
 TOP_ROWS = (
     (1, "FPV-конфиг BF/INAV", 96, "0.25×", "Dump"),
@@ -67,4 +69,5 @@ def render_top_inner() -> str:
 <h2>Метод</h2>
 <p>Веса: полезность для карточки, частота в поле, сложность чтения. Пересчёт — демо. Для реальных данных позже подключим статистику отчётов.</p>
 </article>
+{render_elrs_resources_html()}
 """

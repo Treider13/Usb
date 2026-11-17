@@ -12,14 +12,30 @@ def test_crack_page_has_nav_tab():
 
 
 def test_handle_uid_action():
-    ok, fragment = handle_elrs_form({"action": "uid", "phrase": "test"})
+    ok, fragment, _prefill = handle_elrs_form({"action": "uid", "phrase": "test"})
     assert ok
     assert "4F04FD822155" in fragment
     assert "79,4,253,130,33,85" in fragment
 
 
+def test_phrase_from_flash_reads_binding_phrase_without_wordlist():
+    import json
+
+    from drone_sweep.elrs_ui import handle_elrs_form
+    from drone_sweep.webapp_forms import Uploaded
+
+    blob = json.dumps({"uid": [79, 4, 253, 130, 33, 85], "binding-phrase": "test"}).encode()
+    ok, fragment, _prefill = handle_elrs_form(
+        {"action": "phrase_from_flash"},
+        {"flash_file": Uploaded("x.bin", b"\xff" + blob)},
+    )
+    assert ok
+    assert "test" in fragment
+    assert "словарь" not in fragment.lower() or "не понадобился" in fragment.lower()
+
+
 def test_handle_crack_missing_wordlist():
-    ok, fragment = handle_elrs_form({"action": "crack", "uid": "79,4,253,130,33,85"})
+    ok, fragment, _prefill = handle_elrs_form({"action": "crack", "uid": "79,4,253,130,33,85"})
     assert not ok
     assert "словарь" in fragment.lower()
 
@@ -27,7 +43,7 @@ def test_handle_crack_missing_wordlist():
 def test_handle_crack_accepts_the_hex_uid_shown_above(tmp_path):
     words = tmp_path / "words.txt"
     words.write_text("nope\ntest\n", encoding="utf-8")
-    ok, fragment = handle_elrs_form(
+    ok, fragment, _prefill = handle_elrs_form(
         {"action": "crack", "uid": "4F04FD822155", "binding_wordlist": str(words)}
     )
     assert ok

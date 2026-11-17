@@ -77,7 +77,7 @@ body {
 }
 .topbar .spacer { margin-left: auto; }
 .connect { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
-.baud, select, input[type="text"], input:not([type]) {
+.baud, select, input[type="text"], input[type="file"], input:not([type]) {
   padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -212,6 +212,8 @@ label input, label select { width: 100%; margin-top: 4px; }
 .top-table th { color: var(--quiet); font-weight: 600; }
 .panel-accent h2 { color: var(--primary-500); border-bottom-color: var(--line); }
 .panel.wide { margin-top: 0; }
+.value-big code { font-size: 1.35rem; color: var(--success); }
+input[type="file"] { width: 100%; margin-top: 4px; }
 .usage-bar { display: flex; height: 28px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin: 12px 0; }
 .usage-seg { display: flex; align-items: center; justify-content: center; background: var(--primary-500); color: #fff; font-size: 11px; font-weight: 700; min-width: 2px; border-right: 1px solid var(--surface-100); }
 .top-stats { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; margin: 12px 0; max-width: 22rem; }

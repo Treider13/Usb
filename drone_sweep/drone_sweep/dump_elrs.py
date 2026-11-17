@@ -174,6 +174,15 @@ def payload_for_scan(file_bytes: bytes) -> tuple[bytes, str]:
     return file_bytes, "raw"
 
 
+def binding_phrase_from_config(config: dict[str, Any]) -> str | None:
+    """Строка привязки из JSON flash/WebUI, если прошивка её не вырезала."""
+    for key in ("binding-phrase", "binding_phrase", "bindingPhrase", "MY_BINDING_PHRASE"):
+        value = config.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def public_extraction_summary(file_bytes: bytes) -> dict[str, Any]:
     """Как CIRCL extract_elrs, но без wifi-password в ответе."""
     scan_bytes, fmt = payload_for_scan(file_bytes)
@@ -185,6 +194,11 @@ def public_extraction_summary(file_bytes: bytes) -> dict[str, Any]:
         uid = uid_list_to_field(entry.get("uid"))
         if uid:
             item["uid"] = uid
+        config = entry.get("config")
+        if isinstance(config, dict):
+            phrase = binding_phrase_from_config(config)
+            if phrase:
+                item["binding_phrase"] = phrase
         if entry.get("wifi_ssid"):
             item["wifi_ssid"] = entry["wifi_ssid"]
         if entry.get("wifi_password"):
