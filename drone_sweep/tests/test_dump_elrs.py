@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from drone_sweep.assemble import Inputs, assemble
-from drone_sweep.dump_elrs import build_json_payload, compute_hashes, extract_json_objects
+from drone_sweep.dump_elrs import build_json_payload, compute_hashes, extract_json_objects, public_extraction_summary
 from drone_sweep.elrs_rainbow import build_memory_table, load_memory_table, lookup_binding_phrase, save_memory_table
 from drone_sweep.radio import parse_radio_image
 
@@ -44,6 +44,42 @@ def test_assemble_binding_crack_without_storing_phrase(tmp_path: Path):
     assert crack.value == "найдена"
     dumped = json.dumps(card.to_dict(), ensure_ascii=False)
     assert "test" not in dumped
+
+
+def test_orange_does_not_use_elrs_binding_crack(tmp_path: Path):
+    wordlist = tmp_path / "w.txt"
+    wordlist.write_text("test\n", encoding="utf-8")
+    card = assemble(
+        Inputs(
+            banner="Betaflight 4.5.0",
+            dump_text="serialrx_provider = SPEKTRUM2048",
+            nameplates={"radio": "OrangeRX"},
+            binding_wordlist=wordlist,
+        )
+    )
+    crack = card.fields["radio_binding_phrase_crack"]
+    assert crack.status == "not_applicable"
+    assert "Orange" in crack.reason or "Orange" in crack.value
+
+
+def test_milelrs_binding_crack_with_uid(tmp_path: Path):
+    wordlist = tmp_path / "w.txt"
+    wordlist.write_text("nope\ntest\n", encoding="utf-8")
+    card = assemble(
+        Inputs(
+            radio_json={"version": "MILELRS_v437", "uid": "79,4,253,130,33,85"},
+            binding_wordlist=wordlist,
+        )
+    )
+    assert card.fields["radio_protocol"].value == "MILELRS"
+    assert card.fields["radio_binding_phrase_crack"].value == "найдена"
+
+
+def test_public_extraction_skips_wifi_password_value():
+    blob = json.dumps({"uid": [1, 2, 3, 4, 5, 6], "wifi-password": "secret"}).encode()
+    summary = public_extraction_summary(b"\xff" + blob)
+    assert summary["extracted"][0]["wifi_password_present"] is True
+    assert "secret" not in json.dumps(summary)
 
 
 def test_memory_table_roundtrip(tmp_path: Path):

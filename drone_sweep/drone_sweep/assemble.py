@@ -18,6 +18,7 @@ from .logs import load_bin, load_tlog
 from .mission_files import parse_gpx, parse_plan, parse_qgc_waypoints
 from .model import Card, confirmed, document, missing, not_applicable
 from .ports import ardupilot_ports, decode_osd_position, parse_betaflight_serial
+from .dump_elrs import public_extraction_summary
 from .elrs_assemble import try_binding_phrase_crack
 from .radio import parse_radio_image, parse_radio_json
 from .stm32 import parse_stm32_log
@@ -687,11 +688,22 @@ def _radio_fields(card: Card, inputs: Inputs) -> None:
         card.files.append({"kind": "radio_json_redacted", "sha256": sha256_bytes(reading.redacted)})
     elif inputs.radio_image is not None:
         reading = parse_radio_image(inputs.radio_image)
+        flash = public_extraction_summary(inputs.radio_image)
+        if flash["extracted"] or flash["fragments"]:
+            card.put(
+                "radio_elrs_flash_extract",
+                confirmed(
+                    flash,
+                    "CIRCL dump_elrs",
+                    "ExpressLRS/MILELRS: JSON из .bin или Intel HEX; пароль Wi‑Fi не копируется",
+                ),
+            )
         card.files.append(
             {
                 "kind": "radio_image_redacted",
                 "sha256": sha256_bytes(reading.redacted),
                 "sha256_original": sha256_bytes(inputs.radio_image),
+                "md5_original": flash["md5"],
             }
         )
     if reading is None:

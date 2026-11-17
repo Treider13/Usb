@@ -7,7 +7,12 @@ import json
 import sys
 from pathlib import Path
 
-from .dump_elrs import build_json_payload, compute_hashes, extract_json_objects
+from .dump_elrs import (
+    build_json_payload,
+    extract_json_objects,
+    payload_for_scan,
+    public_extraction_summary,
+)
 from .elrs_binding import binding_phrase_to_uid, parse_uid_bytes, uid_bytes_to_hex
 from .elrs_rainbow import (
     build_memory_table,
@@ -95,12 +100,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"файл не найден: {parsed.input}", file=sys.stderr)
             return 1
         data = parsed.input.read_bytes()
-        md5_hash, sha256_hash = compute_hashes(data)
-        entries = extract_json_objects(data)
+        scan_bytes, fmt = payload_for_scan(data)
+        summary = public_extraction_summary(data)
+        entries = extract_json_objects(scan_bytes)
         if parsed.json:
-            print(json.dumps(build_json_payload(md5_hash, sha256_hash, entries, debug=parsed.debug), ensure_ascii=False, indent=2))
+            if parsed.debug:
+                payload = build_json_payload(summary["md5"], summary["sha256"], entries, debug=True)
+                payload["format"] = fmt
+                print(json.dumps(payload, ensure_ascii=False, indent=2))
+            else:
+                print(json.dumps(summary, ensure_ascii=False, indent=2))
             return 0
-        _print_dump_text(md5_hash, sha256_hash, entries, debug=parsed.debug)
+        print(f"format: {fmt}")
+        _print_dump_text(summary["md5"], summary["sha256"], entries, debug=parsed.debug)
         return 0
     if parsed.command == "crack":
         uid = parse_uid_bytes(parsed.uid)

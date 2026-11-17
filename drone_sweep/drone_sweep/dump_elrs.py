@@ -107,6 +107,99 @@ def build_json_payload(
     return {"md5": md5_hash, "sha256": sha256_hash, "extracted": extracted}
 
 
+_IHEX_DIGITS = frozenset(b"0123456789abcdefABCDEF")
+
+
+def is_intel_hex(data: bytes) -> bool:
+    stripped = data.lstrip()
+    if len(stripped) < 11 or stripped[0:1] != b":":
+        return False
+    return all(byte in _IHEX_DIGITS for byte in stripped[1:9])
+
+
+def intel_hex_to_bin(data: bytes) -> bytes:
+    payload: dict[int, int] = {}
+    base = 0
+    saw_eof = False
+    for line in data.splitlines():
+        line = line.strip()
+        if not line or line[0:1] != b":":
+            if line:
+                raise ValueError(f"Intel HEX record does not start with ':': {line[:16]!r}")
+            continue
+        try:
+            raw = bytes.fromhex(line[1:].decode("ascii"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ValueError(f"Malformed Intel HEX record: {line[:16]!r}") from exc
+        if len(raw) < 5:
+            raise ValueError(f"Intel HEX record too short: {line!r}")
+        length, addr_hi, addr_lo, rtype = raw[0], raw[1], raw[2], raw[3]
+        record_data = raw[4 : 4 + length]
+        checksum = raw[4 + length]
+        if len(record_data) != length:
+            raise ValueError(f"Intel HEX length mismatch: {line!r}")
+        if (sum(raw[: 4 + length]) + checksum) & 0xFF != 0:
+            raise ValueError(f"Intel HEX checksum error: {line!r}")
+        addr = (addr_hi << 8) | addr_lo
+        if rtype == 0x00:
+            absolute = base + addr
+            for index, byte in enumerate(record_data):
+                payload[absolute + index] = byte
+        elif rtype == 0x01:
+            saw_eof = True
+            break
+        elif rtype == 0x02:
+            if length != 2:
+                raise ValueError(f"Intel HEX type 02 length must be 2: {line!r}")
+            base = ((record_data[0] << 8) | record_data[1]) << 4
+        elif rtype == 0x04:
+            if length != 2:
+                raise ValueError(f"Intel HEX type 04 length must be 2: {line!r}")
+            base = ((record_data[0] << 8) | record_data[1]) << 16
+    if not payload:
+        return b""
+    if not saw_eof:
+        raise ValueError("Intel HEX missing EOF record")
+    lo, hi = min(payload), max(payload)
+    return bytes(payload.get(address, 0xFF) for address in range(lo, hi + 1))
+
+
+def payload_for_scan(file_bytes: bytes) -> tuple[bytes, str]:
+    """Бинарник для extract_json_objects (CIRCL drone_to_misp.extract_elrs)."""
+    if is_intel_hex(file_bytes):
+        try:
+            return intel_hex_to_bin(file_bytes), "intel_hex"
+        except ValueError:
+            return file_bytes, "raw"
+    return file_bytes, "raw"
+
+
+def public_extraction_summary(file_bytes: bytes) -> dict[str, Any]:
+    """Как CIRCL extract_elrs, но без wifi-password в ответе."""
+    scan_bytes, fmt = payload_for_scan(file_bytes)
+    md5_hash, sha256_hash = compute_hashes(file_bytes)
+    entries = extract_json_objects(scan_bytes)
+    extracted: list[dict[str, Any]] = []
+    for entry in entries:
+        item: dict[str, Any] = {}
+        uid = uid_list_to_field(entry.get("uid"))
+        if uid:
+            item["uid"] = uid
+        if entry.get("wifi_ssid"):
+            item["wifi_ssid"] = entry["wifi_ssid"]
+        if entry.get("wifi_password"):
+            item["wifi_password_present"] = True
+        if item:
+            extracted.append(item)
+    return {
+        "md5": md5_hash,
+        "sha256": sha256_hash,
+        "format": fmt,
+        "fragments": len(entries),
+        "extracted": extracted,
+    }
+
+
 def uid_list_to_field(uid: list) -> str | None:
     if not isinstance(uid, list) or len(uid) != 6:
         return None
