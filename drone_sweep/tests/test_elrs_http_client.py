@@ -25,14 +25,18 @@ def test_empty_esp_reply_is_retried_then_config_is_read():
             if drops["n"] < 1:
                 drops["n"] += 1
                 return
+            assert request.startswith(b"GET ")
+            assert b" HTTP/1.1\r\n" in request
+            assert b"Accept: */*" in request
+            assert b"Connection: close" not in request
             path = request.split(b" ", 2)[1]
             if path == b"/config":
                 body = b'{"config":{"uid":[1,2,3,4,5,6]},"settings":{"version":"ExpressLRS 3.5.0"}}'
             else:
                 body = b"{}"
             head = (
-                b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n"
-                b"Connection: close\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n"
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n"
             )
             conn.sendall(head + body)
         finally:
@@ -57,7 +61,7 @@ def test_esp_401_stops_like_the_web_ui_password_prompt():
     def handler(conn: socket.socket) -> None:
         try:
             conn.recv(4096)
-            conn.sendall(b"HTTP/1.0 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+            conn.sendall(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n")
         finally:
             conn.close()
 

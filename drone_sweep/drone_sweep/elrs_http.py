@@ -6,16 +6,15 @@ ExpressLRS 3.0.0 also answers GET /target and GET /mode.json.
 /networks.json starts a Wi-Fi scan, so it is not called.
 /update, /reboot, /reset, /cw and /sethome change the device and are not called.
 
-The device is ESPAsyncWebServer. It often drops a Python urllib HTTP/1.1
-client before the status line (the same empty reply curl reports). ExpressLRS
-itself uploads with curl --retry, and several of its own responses set
-Connection: close. This client speaks HTTP/1.0, one request, and retries.
+The device WebUI loads JSON with fetch(url) in src/html/src/utils/feedback.js:
+one HTTP/1.1 GET, Accept */*, no Connection: close. http.client.HTTPConnection
+sends that request. A dropped socket is retried, the same as refreshing the page.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
-import socket
 from base64 import b64encode
 from typing import Any, Callable
 from urllib.error import HTTPError
@@ -61,68 +60,42 @@ def fetch_pages(base: str, opener: Callable[..., Any] | None = None, timeout: fl
     return pages
 
 
-def _http10_get(url: str, timeout: float, password: str = "") -> tuple[int, bytes]:
-    """Один GET, как к ESP: HTTP/1.0 и Connection: close. Пустой ответ — ошибка."""
+def _browser_get(url: str, timeout: float, password: str = "") -> tuple[int, bytes]:
+    """Тот же GET, что fetch() в WebUI ExpressLRS: HTTP/1.1, без Connection: close."""
     parts = urlsplit(url)
     host = parts.hostname or ""
     port = parts.port or 80
     path = parts.path or "/"
     if parts.query:
         path = f"{path}?{parts.query}"
-    lines = [
-        f"GET {path} HTTP/1.0",
-        f"Host: {host}",
-        "User-Agent: strela",
-        "Accept: application/json, */*",
-        "Connection: close",
-    ]
+    headers = {"Accept": "*/*"}
     if password:
         token = b64encode(f":{password}".encode("ascii", errors="ignore")).decode("ascii")
-        lines.append(f"Authorization: Basic {token}")
-    packet = ("\r\n".join(lines) + "\r\n\r\n").encode("ascii")
-    with socket.create_connection((host, port), timeout=timeout) as sock:
-        sock.settimeout(timeout)
-        sock.sendall(packet)
-        chunks: list[bytes] = []
-        while True:
-            try:
-                block = sock.recv(4096)
-            except TimeoutError:
-                break
-            if not block:
-                break
-            chunks.append(block)
-    raw = b"".join(chunks)
-    if not raw:
-        raise ConnectionResetError("Remote end closed connection without response")
-    head, sep, body = raw.partition(b"\r\n\r\n")
-    if not sep:
-        head, sep, body = raw.partition(b"\n\n")
-    if not sep:
-        raise ConnectionResetError("Remote end closed connection without response")
-    status = head.split(b"\n", 1)[0].decode("iso-8859-1", "replace").split()
-    code = int(status[1]) if len(status) > 1 and status[1].isdigit() else 0
-    return code, body
+        headers["Authorization"] = f"Basic {token}"
+    connection = http.client.HTTPConnection(host, port, timeout=timeout)
+    try:
+        connection.request("GET", path, headers=headers)
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
 
 
 def _open_with_retries(url: str, timeout: float, password: str = "", attempts: int = 5) -> bytes:
-    """Повтор, как curl --retry у прошивки ExpressLRS: пустой ответ ESP не финальный."""
+    """Повтор, если модуль закрыл сокет. В браузере это то же самое, что обновить страницу."""
     last: Exception | None = None
     for _ in range(attempts):
         try:
-            code, body = _http10_get(url, timeout, password)
+            code, body = _browser_get(url, timeout, password)
         except (TimeoutError, OSError) as exc:
             last = exc
             continue
         if code >= 400:
             raise HTTPError(url, code, "http", hdrs=None, fp=None)
-        if code == 0:
-            last = ConnectionResetError("Remote end closed connection without response")
-            continue
         return body
     if last is not None:
         raise last
-    raise ConnectionResetError("Remote end closed connection without response")
+    raise ConnectionResetError("приёмник закрыл соединение")
 
 
 def _open(url: str, timeout: float = 5.0) -> bytes:
