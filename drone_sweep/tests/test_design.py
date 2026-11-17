@@ -2,7 +2,7 @@
 
 from drone_sweep.assemble import Inputs, assemble
 from drone_sweep.report import render_html
-from drone_sweep.webapp import crack_page, explain_page, form_page, home_page
+from drone_sweep.webapp import crack_page, explain_page, form_page, home_page, top_page
 from tests.test_ports import DUMP
 
 
@@ -26,7 +26,7 @@ def test_report_names_fields_in_russian_and_keeps_every_key():
         assert f">{name}<" in page or f">{name}</p>" in page
     assert 'class="key">' in page
     assert "Какая плата" in page
-    assert "--primary-500: #ffbb00" in page
+    assert "--primary-500: #e63946" in page
     assert "#e5f6e5" not in page
 
 
@@ -49,3 +49,14 @@ def test_menu_pages_use_the_same_sheet():
     assert "Файл отчёта" not in home
     assert "Пять видов" not in home
     assert "/design" not in home
+
+
+def test_top2026_page_uses_red_betaflight_layout():
+    body = top_page().decode("utf-8")
+    assert "Тактический топ 2026" in body
+    assert 'href="/top2026"' in body
+    assert 'aria-current="page"' in body
+    assert "usage-bar" in body
+    assert "top-table" in body
+    assert "app.betaflight.com" in body
+    assert "--primary-500: #e63946" in body
