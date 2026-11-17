@@ -48,6 +48,8 @@ LABELS = {
     "packet_rate_log_hz": "Герцы из лога",
     "radio_tx_packet_rate": "Индекс скорости пульта",
     "radio_binding_rate": "Вариант привязки",
+    "radio_binding_phrase_crack": "Подбор binding phrase по UID",
+    "radio_elrs_flash_extract": "JSON из flash приёмника (CIRCL)",
     "radio_rateinitialidx": "Индекс режима приёмника",
     "radio_rate_index": "Индекс режима",
     "rcin_interval_us": "Шаг записей RCIN",
