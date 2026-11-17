@@ -207,37 +207,6 @@ GROUP_USE = {
     "Полётник": "Настройки и то, что плата записала в журнал.",
 }
 
-CARD_STEPS = (
-    "Зелёная строка — плата это ответила. Синяя — надпись с корпуса, не измерение.",
-    "Сначала смотрите прошивку, полётник и тип рамы: это какой борт.",
-    "Дальше радио и видео: какой приёмник и на какой частоте картинка.",
-    "Нет спутников в журнале — нет маршрута. Карточка точку не выдумает.",
-)
-
-_JOURNAL_SOURCE = {
-    "bin": "журнал .BIN",
-    "tlog": "телеметрия",
-    "blackbox": "Blackbox",
-    "bin_pos": "оценка положения",
-    "bin_orgn": "дом в журнале",
-    "parm_home": "дом из параметра",
-    "osd_ocr": "надпись на экране",
-    "exif": "фото",
-    "gpx": "файл GPX",
-    "bin_arm": "время взведения",
-}
-_JOURNAL_RESULT = {
-    "found": "нашлось",
-    "absent": "нет",
-    "ignored": "не брали",
-    "present_no_fix": "записи есть, спутники без 3D",
-    "secondary": "есть, взят другой файл",
-    "not_used": "не использовали",
-    "not_joined": "время с другим файлом не склеивали",
-    "header_only": "только заголовок",
-    "outside_arm": "точки были вне взведения",
-}
-
 GROUPS = (
     ("Кто это", ("firmware", "board_name", "frame", "flight_os", "motor_outputs", "imu", "iomcu", "msp_board", "msp_fc_version", "msp_build", "craft_name", "pilot_name", "device_uid", "mcu_id", "autopilot_version", "board_messages", "stm32_probe", "stm32_log_contains_write", "nameplate_vtx", "nameplate_radio", "nameplate_gimbal")),
     ("Радио", ("radio_protocol", "receiver_port", "serialrx_provider", "serial_link_class", "uart_protocol", "air_protocol", "uplink_lq", "packet_rate_log_hz", "radio_tx_packet_rate", "radio_binding_rate", "radio_rateinitialidx", "radio_rate_index", "rcin_interval_us", "mavlink_radio_status", "mavlink_rc_interval_ms", "serial_ports", "expresslrs_spi")),
@@ -534,7 +503,6 @@ def _cell(name: str, item) -> str:
         f'<p><span class="stamp">{html.escape(STATUS_WORD[status])}</span></p>'
         f'<p class="value">{_value_html(item.value)}</p>'
         f'<p class="why">{html.escape(_use(name))}</p>'
-        f'<p class="src">{html.escape(item.source)}</p>'
         "</article>"
     )
 
@@ -582,7 +550,6 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
         blurb = GROUP_USE.get(title, "")
         intro = f'<p class="blurb">{html.escape(blurb)}</p>' if blurb else ""
         sections.append(f"<h2>{html.escape(title)}</h2>{intro}<div class=\"grid\">{''.join(cells)}</div>")
-    steps = "".join(f"<li>{html.escape(line)}</li>" for line in CARD_STEPS)
     gap_lines = []
     covered = set()
     for name, item in card.fields.items():
@@ -591,8 +558,7 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
         covered.add(f"{name}: {item.reason}")
         gap_lines.append(
             f'<li class="hole"><span class="key">{html.escape(name)}</span> '
-            f"<strong>{html.escape(_label(name))}</strong>. {html.escape(_use(name))} "
-            f"Сейчас нет: {html.escape(item.reason)}</li>"
+            f"<strong>{html.escape(_label(name))}</strong>. {html.escape(_use(name))} Сейчас этого нет.</li>"
         )
     for line in card.holes:
         if line in covered or any(line.startswith(f"{name}: ") for name in card.fields):
@@ -602,12 +568,6 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
         holes = "<ul class=\"gaps\">" + "".join(gap_lines) + "</ul>"
     else:
         holes = "<p>Нет данных не осталось. Ниже только то, что прочитано.</p>"
-    journal_rows = []
-    for line in card.journal:
-        source = _JOURNAL_SOURCE.get(line["source"], line["source"])
-        result = _JOURNAL_RESULT.get(line["result"], line["result"])
-        journal_rows.append(f"<li>{html.escape(source)}: {html.escape(result)}. {html.escape(line['detail'])}</li>")
-    journal = "".join(journal_rows) or "<li>Файлов маршрута не передавали.</li>"
     flight_cards = [block for block in (_flight_block(flight) for flight in card.flights) if block]
     flights = "<h2>Вылеты</h2><div class=\"grid\">" + "".join(flight_cards) + "</div>" if flight_cards else ""
     saved = f"<p>Файл отчёта: {html.escape(saved_path)}</p>" if saved_path else ""
@@ -620,13 +580,8 @@ def render_html(card: Card, saved_path: str | None = None) -> str:
 <li class="confirmed"><span class="stamp">Подтверждено</span> прочитано</li>
 <li class="document"><span class="stamp">С шильдика</span> надпись на корпусе</li>
 </ul>
-<h2>С чего начать</h2>
-<ol class="steps">{steps}</ol>
 <h2>Нет данных</h2>
 {holes}
-<h2>Откуда маршрут</h2>
-<p class="blurb">Маршрут только из спутников со статусом 3D. Таких точек нет — маршрута нет, додумывать его не нужно.</p>
-<ol class="steps">{journal}</ol>
 {''.join(sections)}
 {flights}
 """
