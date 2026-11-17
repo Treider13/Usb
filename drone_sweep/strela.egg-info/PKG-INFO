@@ -1,7 +1,0 @@
-Metadata-Version: 2.4
-Name: strela
-Version: 0.2.0
-Summary: Стрела: read-only drone card from Betaflight, INAV, ArduPilot and ExpressLRS.
-Requires-Python: >=3.11
-Requires-Dist: pymavlink==2.4.43
-Requires-Dist: pyserial==3.5
