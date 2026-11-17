@@ -110,11 +110,14 @@ def test_two_receiver_protocols_are_not_collapsed(tmp_path: Path):
 
 def test_usb_read_sends_dump_all_and_builds_the_card(tmp_path: Path):
     port = _scripted_fc()
-    text, boxes, identity = collect_flight_controller(port)
+    captured = collect_flight_controller(port)
+    text, boxes, identity = captured.dump_text, captured.boxnames, captured.identity
     assert "TANTOF405" in text
     assert boxes == "ARM;ANGLE"
     written = b"".join(port.written)
     assert b"dump all\n" in written
+    assert b"diff all\n" in written
+    assert b"wp\n" not in written
     assert b"version\n" in written
     assert b"status\n" in written
     assert b"save" not in written.lower()

@@ -9,7 +9,7 @@ from urllib.parse import parse_qs
 
 from .assemble import assemble
 from .hints import WORKFLOW
-from .menu import APP_NAME, inputs_from_answers, write_report
+from .menu import APP_NAME, _log_id, inputs_from_answers, write_report
 from .report import render_html
 from .theme import page
 
@@ -27,6 +27,8 @@ FORM_FIELDS = (
     ("radio_json", "Страница приёмника", "JSON, который вы сохранили с http://10.0.0.1. Пароль в файл не кладите."),
     ("radio_image", "Образ приёмника", "Файл образа приёмника."),
     ("stm32", "Журнал STM32", "Сохранённый вывод STM32_Programmer_CLI --connect port=SWD или st-info --probe. Стирание и запись не подходят."),
+    ("diff", "diff all", "Сохранённый ответ diff all. Это отличия от заводских, не запись на плату."),
+    ("wp", "wp INAV", "Сохранённый ответ команды wp. load, save и reset в этот файл не кладите."),
     ("nameplate_vtx", "Шильдик видеопередатчика", "Текст с корпуса. Это документ, не измеренный канал."),
     ("nameplate_radio", "Шильдик радиомодуля", "Текст с корпуса. Протокол по нему не называется."),
     ("nameplate_gimbal", "Шильдик подвеса", "Текст с корпуса. Параметр подвеса остаётся отдельно."),
@@ -55,6 +57,7 @@ def connect_bar(ports: list[tuple[str, str]] | None = None) -> str:
 <select name="port" aria-label="USB-порт">{options}</select>
 <span class="baud">115200</span>
 <label class="folder">Папка <input name="out" value="strela-out" aria-label="Папка отчёта"></label>
+<label class="folder">Журнал <input name="log_id" value="" aria-label="Номер журнала ArduPilot" placeholder="последний"></label>
 <button type="submit">Считать</button>
 </form>
 """
@@ -113,7 +116,8 @@ def read_page(ports: list[tuple[str, str]] | None = None) -> bytes:
 {port_field}
 <p class="baud">115200</p>
 <label class="folder">Папка <input name="out" value="strela-out" aria-label="Папка отчёта"></label>
-<p>Имя полётника, прошивка и тип рамы появятся в карточке после чтения.</p>
+<label class="folder">Журнал <input name="log_id" value="" aria-label="Номер журнала ArduPilot" placeholder="последний"></label>
+<p>Имя полётника, прошивка и тип рамы появятся в карточке после чтения. Пустой номер журнала — последний непустой .BIN.</p>
 </section>
 <section class="panel">
 <h2>Сборка</h2>
@@ -206,8 +210,12 @@ class StrelaHandler(BaseHTTPRequestHandler):
         if not picked or not folder:
             self._send(400, page("Нужен порт", "<h1>Выберите USB-порт и папку отчёта</h1><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8"))
             return
+        log_id, log_error = _log_id(form.get("log_id", "").strip())
+        if log_error:
+            self._send(400, page("Номер журнала", f"<h1>Номер журнала</h1><p>{html.escape(log_error)}</p><p><a class=\"action\" href=\"/read\">Назад</a></p>").encode("utf-8"))
+            return
         try:
-            card = assemble(read_usb(picked, log_dir=folder, wants=_wants(form)))
+            card = assemble(read_usb(picked, log_dir=folder, wants=_wants(form), log_id=log_id))
         except (OSError, ReadOnlyError, ValueError) as exc:
             body = page("Порт не ответил", f"<h1>Порт не ответил</h1><p>{html.escape(str(exc))}</p><p>Карточка не собрана.</p><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8")
             self._send(400, body)

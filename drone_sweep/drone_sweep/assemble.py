@@ -14,8 +14,8 @@ from .vtx import inav_grid, inav_saved_frequency, parse_video_grid, parse_vtx_ru
 from .enums_ardupilot import CAMERA_TYPE_45, MOUNT_TYPE_45, rc_protocols_45
 from .hashing import sha256_bytes, sha256_file
 from .hints import WORKFLOW, hint_for_hole
-from .logs import load_bin, load_tlog
-from .mission_files import parse_gpx, parse_plan, parse_qgc_waypoints
+from .logs import flight_timeline, load_bin, load_tlog
+from .mission_files import parse_gpx, parse_inav_wp, parse_plan, parse_qgc_waypoints
 from .model import Card, confirmed, document, missing, not_applicable
 from .ports import ardupilot_ports, decode_osd_position, parse_betaflight_serial
 from .radio import parse_radio_image, parse_radio_json
@@ -50,6 +50,9 @@ class Inputs:
     mavlink_rows: list[dict] | None = None
     read_note: str = ""
     msp_identity: dict | None = None
+    diff_text: str | None = None
+    wp_text: str | None = None
+    commands: list[str] = field(default_factory=list)
 
 
 def assemble(inputs: Inputs) -> Card:
@@ -75,6 +78,15 @@ def assemble(inputs: Inputs) -> Card:
         card.raw_banner = dump.banner or card.raw_banner
 
     _vehicle_fields(card, dump, rows)
+    if inputs.dump_text:
+        card.files.append({"kind": "dump_all", "sha256": sha256_bytes(inputs.dump_text.encode("utf-8"))})
+    if inputs.diff_text is not None:
+        card.files.append({"kind": "diff_all", "sha256": sha256_bytes(inputs.diff_text.encode("utf-8"))})
+        _cli_diff(card, inputs.diff_text)
+    if inputs.wp_text is not None:
+        card.files.append({"kind": "inav_wp", "sha256": sha256_bytes(inputs.wp_text.encode("utf-8"))})
+    if inputs.commands:
+        card.commands = list(inputs.commands)
     _radio_fields(card, inputs)
     _nameplates(card, inputs.nameplates)
     _stm32(card, inputs.stm32_text)
@@ -288,12 +300,33 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
             event.pop("name", None)
         if events:
             card.put("log_events", confirmed(events, "bin EV"))
+        timeline = flight_timeline(rows)
+        if timeline:
+            card.put(
+                "flight_timeline",
+                confirmed(timeline, "bin EV/ERR", "имена событий из AP_Logger.h, LogEvent и LogErrorSubsystem"),
+            )
+        else:
+            card.put("flight_timeline", missing("в .BIN нет EV, ERR и строки Failsafe", "bin"))
         _known_params(card, params)
         _ardupilot_ports(card, params)
         _learn_banner(card, [str(item.get("text") or "") for item in messages], "bin MSG")
         _baro(card, rows)
         _messages_with_rcin(card, rows, messages)
         _rcin_interval(card, rows)
+
+
+def _cli_diff(card: Card, text: str) -> None:
+    parsed = parse_dump(text)
+    settings: dict[str, str] = {}
+    for section in parsed.sections:
+        prefix = "" if section["name"] == "master" else f"{section['name']}."
+        for key, value in section["settings"].items():
+            settings[f"{prefix}{key}"] = value
+    if settings:
+        card.put("cli_diff", confirmed(settings, "diff all", "строки, которые diff all напечатал как отличие от заводских"))
+    else:
+        card.put("cli_diff", confirmed("нет отличий", "diff all", "diff all не напечатал ни одного set"))
 
 
 def _osd_layout(card: Card, osd: dict[str, str], family: str = "betaflight") -> None:
@@ -958,6 +991,18 @@ def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
     if inputs.gps_csv_path is not None:
         card.files.append(_file_record(inputs.gps_csv_path, "blackbox_gps_csv"))
         blackbox_points = parse_gps_csv(inputs.gps_csv_path)
+        if blackbox_points:
+            card.put(
+                "blackbox_arm",
+                confirmed(blackbox_points[0], "blackbox GPS CSV", "первая точка после порога numSat, как у blackbox_decode. Это не EV."),
+            )
+            card.put(
+                "blackbox_disarm",
+                confirmed(blackbox_points[-1], "blackbox GPS CSV", "последняя точка после того же порога. Двоичные G-кадры не разбираются."),
+            )
+        else:
+            card.put("blackbox_arm", missing("GPS CSV без точек", "blackbox"))
+            card.put("blackbox_disarm", missing("GPS CSV без точек", "blackbox"))
         if not blackbox_points:
             journal.append({"source": "blackbox", "result": "absent", "detail": "GPS CSV без точек"})
     elif inputs.blackbox_path is not None:
@@ -968,6 +1013,8 @@ def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
                 "detail": "заголовок прочитан. Трек из двоичных G-кадров берётся только из GPS CSV blackbox_decode",
             }
         )
+        card.put("blackbox_arm", missing("нет GPS CSV blackbox_decode. Двоичные кадры не разбираются.", "blackbox"))
+        card.put("blackbox_disarm", missing("нет GPS CSV blackbox_decode. Двоичные кадры не разбираются.", "blackbox"))
     else:
         journal.append({"source": "blackbox", "result": "absent", "detail": "Blackbox не передан"})
 
@@ -1000,6 +1047,18 @@ def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
     if cmd_points and not mission:
         mission = cmd_points
         mission_source = "bin CMD"
+    if inputs.wp_text is not None:
+        wp_points, wp_note = parse_inav_wp(inputs.wp_text)
+        if wp_points:
+            card.put("inav_waypoints", confirmed(wp_points, "inav wp", wp_note))
+            if not mission:
+                mission = [
+                    {"lat": point["lat"], "lon": point["lon"], "alt_cm": point["alt_cm"], "action": point["action_name"]}
+                    for point in wp_points
+                ]
+                mission_source = "inav wp"
+        else:
+            card.put("inav_waypoints", missing(wp_note, "inav wp"))
     journal.append({"source": "osd_ocr", "result": "not_used", "detail": "координаты с OSD треком не считаются"})
     journal.append({"source": "exif", "result": "not_used", "detail": "EXIF — точка съёмки, не маршрут"})
 
@@ -1092,7 +1151,7 @@ def _publish_route(card: Card, flights: list[dict], mission: list[dict], mission
         card.put("mission_waypoints", confirmed(mission, mission_source))
         card.put("mission_file_source", confirmed(mission_source, mission_source))
     else:
-        card.put("mission_waypoints", missing("CMD, GPX wpt/rte, .waypoints и .plan не дали точек", "mission"))
+        card.put("mission_waypoints", missing("CMD, GPX wpt/rte, .waypoints, .plan и wp INAV не дали точек", "mission"))
         card.put("mission_file_source", confirmed("none", "mission"))
 
 

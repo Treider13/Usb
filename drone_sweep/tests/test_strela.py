@@ -20,7 +20,7 @@ def test_menu_builds_the_b162_card(tmp_path: Path):
     boxes = tmp_path / "boxes.txt"
     boxes.write_text(BOXES, encoding="utf-8")
     out = tmp_path / "out"
-    lines = ["1", str(dump), str(boxes), *([""] * 13), str(out), "5"]
+    lines = ["1", str(dump), str(boxes), *([""] * 15), str(out), "5"]
     text = run_menu(lines)
     assert "Стрела" in text
     assert "Отчёт:" in text

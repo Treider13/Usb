@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-READ_CLI = {"version", "status", "dump", "diff", "tasks", "get", "exit"}
+READ_CLI = {"version", "status", "dump", "diff", "tasks", "get", "exit", "wp"}
 MSP_BOXNAMES = 116
 MSP_API_VERSION = 1
 MSP_FC_VARIANT = 2
@@ -43,6 +43,8 @@ def assert_readonly_cli(command: str) -> str:
         raise ReadOnlyError("get читает одно имя")
     if head == "exit" and text.lower() != "exit noreboot":
         raise ReadOnlyError("exit без noreboot перезагружает плату")
+    if head == "wp" and text.lower() != "wp":
+        raise ReadOnlyError("разрешён только wp. load, save и reset меняют миссию")
     return text
 
 
@@ -97,11 +99,25 @@ def read_boxnames(port: ScriptedPort) -> str:
     return payload.decode("latin1", errors="replace")
 
 
-def collect_flight_controller(port, leave_cli: str | None = "exit noreboot", wants: dict | None = None) -> tuple[str, str, dict]:
+@dataclass
+class FcCapture:
+    """What one read-only CLI session returned. diff and wp stay separate from dump all."""
+
+    dump_text: str
+    boxnames: str
+    identity: dict
+    diff_text: str | None = None
+    wp_text: str | None = None
+    commands: list[str] = field(default_factory=list)
+
+
+def collect_flight_controller(port, leave_cli: str | None = "exit noreboot", wants: dict | None = None) -> FcCapture:
     """Read MSP identity and box names, then the CLI dump.
 
     Names and identity are requested first: after `#` the port is a text
     console and an MSP frame is no longer a request. Nothing is saved.
+    `diff all` is sent in the same session. `wp` is sent only when the
+    banner is INAV, and only as the bare command.
     """
     chosen = wants or {"msp": True, "dump": True}
     raw_identity: dict[int, bytes | None] = {}
@@ -109,12 +125,41 @@ def collect_flight_controller(port, leave_cli: str | None = "exit noreboot", wan
         raw_identity = _read_msp_identity(port)
     boxes = read_boxnames(port) if chosen.get("dump", True) or chosen.get("msp", True) else ""
     dump_text = ""
+    diff_text = None
+    wp_text = None
+    commands: list[str] = []
     if chosen.get("dump", True):
-        dump_text = read_cli(port, ["version", "status", "dump all"], leave=leave_cli)
+        dump_text, diff_text, wp_text, commands = _cli_dump(port, leave_cli)
     from .msp_identity import describe_identity
 
     identity = describe_identity(raw_identity, family_in_text(dump_text))
-    return dump_text, boxes, identity
+    return FcCapture(dump_text, boxes, identity, diff_text, wp_text, commands)
+
+
+def _cli_dump(port, leave: str | None) -> tuple[str, str, str | None, list[str]]:
+    """One `#` session. The replies of dump all and diff all are not mixed."""
+    commands = ["version", "status", "dump all", "diff all"]
+    port.write(b"#")
+    parts = [port.read().decode("latin1", errors="replace")]
+    replies: dict[str, str] = {}
+    for command in commands:
+        safe = assert_readonly_cli(command)
+        port.write(safe.encode("ascii") + b"\n")
+        replies[command] = port.read().decode("latin1", errors="replace")
+        if command != "diff all":
+            parts.append(replies[command])
+    dump_text = "".join(parts)
+    wp_text = None
+    if family_in_text(dump_text) == "inav":
+        safe = assert_readonly_cli("wp")
+        port.write(safe.encode("ascii") + b"\n")
+        wp_text = port.read().decode("latin1", errors="replace")
+        commands.append("wp")
+    if leave is not None:
+        safe = assert_readonly_cli(leave)
+        port.write(safe.encode("ascii") + b"\n")
+        commands.append(safe)
+    return dump_text, replies["diff all"], wp_text, commands
 
 
 def _read_msp_identity(port) -> dict[int, bytes | None]:
@@ -382,13 +427,21 @@ def _fill_missing_parameters(connection, rows: list[dict], expected: int | None)
         have.add(int(message.param_index))
 
 
-def read_usb(path: str, port_opener=None, mavlink_opener=None, log_dir=None, wants: dict | None = None) -> "Inputs":
+def read_usb(
+    path: str,
+    port_opener=None,
+    mavlink_opener=None,
+    log_dir=None,
+    wants: dict | None = None,
+    log_id: int | None = None,
+) -> "Inputs":
     """Identify the board the way the Configurator opens a port, then read it.
 
     Betaflight Configurator sends MSP_API_VERSION and then MSP_FC_VARIANT and
     stops unless the answer is BTFL. Strela keeps INAV and Cleanflight. An
     ArduPilot board is read with AUTOPILOT_VERSION, PARAM_REQUEST_LIST and,
-    when a folder is given, the newest dataflash log. Nothing is written back.
+    when a folder is given, one dataflash log. log_id chooses which log.
+    Without it the newest non-empty log is saved. Nothing is written back.
     """
     from pathlib import Path
 
@@ -397,8 +450,15 @@ def read_usb(path: str, port_opener=None, mavlink_opener=None, log_dir=None, wan
 
     if port_opener is not None:
         port = port_opener(path)
-        dump_text, boxes, identity = collect_flight_controller(port, wants=wants)
-        return Inputs(dump_text=dump_text, boxnames=boxes, msp_identity=identity)
+        captured = collect_flight_controller(port, wants=wants)
+        return Inputs(
+            dump_text=captured.dump_text,
+            boxnames=captured.boxnames,
+            msp_identity=captured.identity,
+            diff_text=captured.diff_text,
+            wp_text=captured.wp_text,
+            commands=captured.commands,
+        )
     port = open_betaflight_port(path)
     try:
         kind, beat = _classify(port)
@@ -424,7 +484,7 @@ def read_usb(path: str, port_opener=None, mavlink_opener=None, log_dir=None, wan
                             rows.append({"name": "STATUSTEXT", "text": str(text).rstrip("\x00").strip()})
                 if chosen.get("bin", True):
                     folder = Path(log_dir) if log_dir else None
-                    log_rows, log_path, log_note = read_dataflash(link, folder)
+                    log_rows, log_path, log_note = read_dataflash(link, folder, log_id=log_id)
             finally:
                 close = getattr(link, "close", None)
                 if close is not None:
@@ -433,11 +493,26 @@ def read_usb(path: str, port_opener=None, mavlink_opener=None, log_dir=None, wan
             if beat:
                 rows.insert(0, {"name": "HEARTBEAT", **beat})
             notes = " ".join(part for part in (note, log_note) if part)
-            return Inputs(mavlink_rows=rows, read_note=notes, bin_path=log_path)
+            commands: list[str] = []
+            if chosen.get("params", True) or chosen.get("msp", True):
+                commands.extend(["AUTOPILOT_VERSION", "PARAM_REQUEST_LIST"])
+            if chosen.get("bin", True):
+                commands.append("LOG_REQUEST_LIST")
+                if log_path is not None:
+                    commands.append("LOG_REQUEST_DATA")
+            return Inputs(mavlink_rows=rows, read_note=notes, bin_path=log_path, commands=commands)
         if kind in {"betaflight", "inav", "cleanflight"}:
             leave, note = cli_leave(kind)
-            dump_text, boxes, identity = collect_flight_controller(port, leave_cli=leave, wants=wants)
-            return Inputs(dump_text=dump_text, boxnames=boxes, read_note=note, msp_identity=identity)
+            captured = collect_flight_controller(port, leave_cli=leave, wants=wants)
+            return Inputs(
+                dump_text=captured.dump_text,
+                boxnames=captured.boxnames,
+                read_note=note,
+                msp_identity=captured.identity,
+                diff_text=captured.diff_text,
+                wp_text=captured.wp_text,
+                commands=captured.commands,
+            )
     finally:
         port.raw.close()
     raise ValueError("порт не назвал Betaflight, INAV, Cleanflight и не прислал HEARTBEAT")
