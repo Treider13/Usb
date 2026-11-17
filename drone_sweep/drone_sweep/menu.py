@@ -10,7 +10,7 @@ from .assemble import Inputs, assemble
 from .elrs_http import RadioAuthRequired, fetch_pages, normalize_pages
 from .hints import WORKFLOW
 from .report import render_html
-from .usb_read import ReadOnlyError, assert_readonly_cli, collect_flight_controller, open_betaflight_port
+from .usb_read import ReadOnlyError, assert_readonly_cli, describe_ports, read_usb
 
 
 APP_NAME = "Стрела"
@@ -88,13 +88,15 @@ def explain_text() -> str:
     return "\n".join(lines)
 
 
-def list_usb_ports(directory: Path = Path("/dev")) -> list[str]:
-    if not directory.is_dir():
-        return []
-    found = []
-    for pattern in ("ttyACM*", "ttyUSB*"):
-        found.extend(str(path) for path in sorted(directory.glob(pattern)))
-    return found
+def list_usb_ports(directory: Path | None = None) -> list[str]:
+    if directory is not None:
+        if not directory.is_dir():
+            return []
+        found = []
+        for pattern in ("ttyACM*", "ttyUSB*"):
+            found.extend(str(path) for path in sorted(directory.glob(pattern)))
+        return found
+    return [device for device, _label in describe_ports()]
 
 
 def run_menu(input_lines: list[str], output: list[str] | None = None, port_opener=None) -> str:
@@ -133,8 +135,8 @@ def run_menu(input_lines: list[str], output: list[str] | None = None, port_opene
         elif choice == "3":
             ports = list_usb_ports()
             say("Порты: " + (", ".join(ports) if ports else "не найдены. Подключите полётник кабелем USB и откройте меню снова."))
-            say("Стрела отправит только #, dump all и MSP_BOXNAMES. set, save и serialpassthrough не отправляются.")
-            picked = ask("Путь порта, чтобы снять dump all и собрать карточку. Enter — не читать.").strip()
+            say("Кнопка чтения сама отличает Betaflight, INAV, Cleanflight и MAVLink. В порт уходят только чтение: MSP, dump all или список параметров. set, save и serialpassthrough не отправляются.")
+            picked = ask("Путь порта. Enter — не читать.").strip()
             if not picked:
                 continue
             folder = ask("Папка отчёта").strip()
@@ -142,15 +144,15 @@ def run_menu(input_lines: list[str], output: list[str] | None = None, port_opene
                 say("Папка отчёта обязательна. Порт не открывался.")
                 continue
             try:
-                port = open_betaflight_port(picked) if port_opener is None else port_opener(picked)
-                dump_text, boxes = collect_flight_controller(port)
+                card_inputs = read_usb(picked, port_opener=port_opener)
             except (OSError, ReadOnlyError, ValueError) as exc:
                 say(f"Порт не ответил: {exc}. Карточка из пустого ответа не собрана.")
                 continue
-            if "betaflight" not in dump_text.lower() and "inav" not in dump_text.lower() and "cleanflight" not in dump_text.lower():
-                say("В ответе порта нет баннера Betaflight, INAV или Cleanflight. Карточка не собрана, значения не выдуманы.")
+            dump_text = card_inputs.dump_text or ""
+            if card_inputs.mavlink_rows is None and "betaflight" not in dump_text.lower() and "inav" not in dump_text.lower() and "cleanflight" not in dump_text.lower():
+                say("В ответе порта нет баннера Betaflight, INAV или Cleanflight и нет HEARTBEAT. Карточка не собрана, значения не выдуманы.")
                 continue
-            card = assemble(Inputs(dump_text=dump_text, boxnames=boxes))
+            card = assemble(card_inputs)
             page = write_report(card, Path(folder))
             say(f"Отчёт: {page}")
             receiver = card.fields.get("receiver_port")

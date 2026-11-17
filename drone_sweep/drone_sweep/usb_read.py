@@ -1,9 +1,9 @@
-"""USB session for Betaflight and INAV.
+"""USB session.
 
 Only read commands are written to the port. `save`, `set`, `defaults`
 and MSP codes that write configuration are rejected before they reach
-the wire. ArduPilot has no CLI password and no CLI dump; its card is
-built from the .BIN file.
+the wire. A MAVLink board is identified by HEARTBEAT and read with
+PARAM_REQUEST_LIST. No parameter is written back.
 """
 
 from __future__ import annotations
@@ -130,11 +130,134 @@ class QuietPort:
         return bytes(buf)
 
 
-def open_betaflight_port(path: str) -> QuietPort:
+def open_betaflight_port(path: str, overall_s: float = 90.0) -> QuietPort:
     import serial
 
     raw = serial.Serial(path, 115200, timeout=0.05)
-    return QuietPort(raw)
+    return QuietPort(raw, overall_s=overall_s)
+
+
+def msp_variant_name(frame: bytes) -> str | None:
+    """MSP_FC_VARIANT payload. Betaflight answers BTFL, INAV answers INAV, Cleanflight answers CLFL."""
+    try:
+        payload = _msp_payload(frame, MSP_FC_VARIANT)
+    except ValueError:
+        return None
+    token = payload[:4]
+    return {b"BTFL": "betaflight", b"INAV": "inav", b"CLFL": "cleanflight"}.get(token)
+
+
+def mavlink_heartbeat(buf: bytes) -> dict | None:
+    """The first HEARTBEAT in a buffer. ArduPilot's autopilot field is 3."""
+    try:
+        from pymavlink.dialects.v20 import ardupilotmega as dialect
+    except ImportError:
+        return None
+    parser = dialect.MAVLink(None)
+    parser.robust_parsing = True
+    for index in range(len(buf)):
+        message = parser.parse_char(buf[index:index + 1])
+        if message is not None and message.get_type() == "HEARTBEAT":
+            return {
+                "autopilot": message.autopilot,
+                "type": message.type,
+                "mavlink_version": getattr(message, "mavlink_version", None),
+            }
+    return None
+
+
+def read_mavlink_parameters(connection) -> list[dict]:
+    """PARAM_REQUEST_LIST only. No parameter is written back."""
+    connection.mav.param_request_list_send(connection.target_system, connection.target_component)
+    rows: list[dict] = []
+    while True:
+        message = connection.recv_match(type="PARAM_VALUE", blocking=True, timeout=3)
+        if message is None:
+            break
+        rows.append(
+            {
+                "name": "PARAM_VALUE",
+                "param_id": message.param_id,
+                "param_value": message.param_value,
+            }
+        )
+        if message.param_index + 1 >= message.param_count:
+            break
+    return rows
+
+
+def read_usb(path: str, port_opener=None, mavlink_opener=None) -> "Inputs":
+    """Identify the board the way the Configurator opens a port, then read it.
+
+    Betaflight Configurator sends MSP_API_VERSION and then MSP_FC_VARIANT and
+    stops unless the answer is BTFL. Strela keeps INAV and Cleanflight, and a
+    MAVLink HEARTBEAT is read with PARAM_REQUEST_LIST.
+    """
+    from .assemble import Inputs
+
+    if port_opener is not None:
+        port = port_opener(path)
+        dump_text, boxes = collect_flight_controller(port)
+        return Inputs(dump_text=dump_text, boxnames=boxes)
+    kind, beat = _probe(path)
+    if kind == "mavlink":
+        if mavlink_opener is None:
+            from pymavlink import mavutil
+
+            link = mavutil.mavlink_connection(path, baud=115200)
+            link.wait_heartbeat(timeout=5)
+        else:
+            link = mavlink_opener(path)
+        try:
+            rows = read_mavlink_parameters(link)
+        finally:
+            close = getattr(link, "close", None)
+            if close is not None:
+                close()
+        if beat:
+            rows.insert(0, {"name": "HEARTBEAT", **beat})
+        return Inputs(mavlink_rows=rows)
+    if kind in {"betaflight", "inav", "cleanflight"}:
+        port = open_betaflight_port(path)
+        try:
+            dump_text, boxes = collect_flight_controller(port)
+        finally:
+            port.raw.close()
+        return Inputs(dump_text=dump_text, boxnames=boxes)
+    raise ValueError("порт не назвал Betaflight, INAV, Cleanflight и не прислал HEARTBEAT")
+
+
+def _probe(path: str) -> tuple[str, dict | None]:
+    port = open_betaflight_port(path, overall_s=1.5)
+    try:
+        heard = port.read()
+        beat = mavlink_heartbeat(heard)
+        if beat is not None:
+            return "mavlink", beat
+        port.write(msp_request(MSP_API_VERSION))
+        port.read()
+        port.write(msp_request(MSP_FC_VARIANT))
+        variant = msp_variant_name(port.read())
+        if variant is not None:
+            return variant, None
+    finally:
+        port.raw.close()
+    return "unknown", None
+
+
+def describe_ports() -> list[tuple[str, str]]:
+    """Device path and the label a person sees, same role as the Configurator port list."""
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        return []
+    found = []
+    for entry in list_ports.comports():
+        label = entry.device
+        if entry.description and entry.description != "n/a":
+            label = f"{entry.device} — {entry.description}"
+        found.append((entry.device, label))
+    return found
 
 
 def _msp_payload(frame: bytes, code: int) -> bytes:

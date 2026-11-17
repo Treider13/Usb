@@ -8,7 +8,17 @@ from pathlib import Path
 from drone_sweep.assemble import Inputs, assemble
 from drone_sweep.menu import run_menu
 from drone_sweep.ports import decode_osd_position, map_baudrate
-from drone_sweep.usb_read import QuietPort, ScriptedPort, collect_flight_controller, msp_request
+from drone_sweep.usb_read import (
+    MSP_FC_VARIANT,
+    QuietPort,
+    ScriptedPort,
+    collect_flight_controller,
+    mavlink_heartbeat,
+    msp_request,
+    msp_variant_name,
+    read_mavlink_parameters,
+)
+from drone_sweep.webapp import home_page
 from tests.bin_builder import write_bin
 
 
@@ -140,6 +150,89 @@ def _scripted_fc() -> ScriptedPort:
             reply,
         ]
     )
+
+
+def _variant_frame(token: bytes) -> bytes:
+    checksum = len(token) ^ MSP_FC_VARIANT
+    for byte in token:
+        checksum ^= byte
+    return bytes([ord("$"), ord("M"), ord(">"), len(token), MSP_FC_VARIANT]) + token + bytes([checksum])
+
+
+def test_msp_variant_names_the_three_flight_stacks():
+    assert msp_variant_name(_variant_frame(b"BTFL")) == "betaflight"
+    assert msp_variant_name(_variant_frame(b"INAV")) == "inav"
+    assert msp_variant_name(_variant_frame(b"CLFL")) == "cleanflight"
+    assert msp_variant_name(_variant_frame(b"XXXX")) is None
+    assert msp_variant_name(b"not a frame") is None
+
+
+def test_mavlink_heartbeat_requires_a_real_frame():
+    from io import BytesIO
+
+    from pymavlink.dialects.v20 import ardupilotmega as dialect
+
+    buf = BytesIO()
+    link = dialect.MAVLink(buf)
+    link.srcSystem = 1
+    link.heartbeat_send(2, 3, 0, 0, 4, 3)
+    found = mavlink_heartbeat(buf.getvalue())
+    assert found is not None
+    assert found["autopilot"] == 3
+    assert mavlink_heartbeat(b"\xfd" * 40) is None
+
+
+def test_param_request_list_does_not_write_a_parameter():
+    class Link:
+        def __init__(self):
+            self.sent = []
+            self.target_system = 1
+            self.target_component = 1
+            self.mav = self
+            self.left = [
+                _Param("SERIAL1_PROTOCOL", 29.0, 0, 2),
+                _Param("SERIAL1_BAUD", 115.0, 1, 2),
+            ]
+
+        def param_request_list_send(self, system, component):
+            self.sent.append((system, component))
+
+        def recv_match(self, type=None, blocking=False, timeout=None):
+            return self.left.pop(0) if self.left else None
+
+    link = Link()
+    rows = read_mavlink_parameters(link)
+    assert link.sent == [(1, 1)]
+    card = assemble(
+        Inputs(
+            mavlink_rows=[{"name": "HEARTBEAT", "autopilot": 3, "type": 2}, *rows]
+        )
+    )
+    assert card.family == "ardupilot"
+    assert card.fields["mavlink_heartbeat"].source == "usb HEARTBEAT"
+    assert card.fields["parameters"].source == "usb PARAM_VALUE"
+    assert card.fields["serial_ports"].value[0]["protocol_name"] == "CRSF"
+    assert "dump all" not in str(link.sent)
+
+
+class _Param:
+    def __init__(self, param_id, param_value, param_index, param_count):
+        self.param_id = param_id
+        self.param_value = param_value
+        self.param_index = param_index
+        self.param_count = param_count
+
+
+def test_home_page_reads_the_selected_usb_port():
+    page = home_page([("/dev/ttyACM0", "/dev/ttyACM0 — полётник")]).decode("utf-8")
+    assert 'action="/usb"' in page
+    assert "Считать" in page
+    assert 'name="port"' in page
+    assert "/dev/ttyACM0" in page
+    assert "Файл отчёта" not in page
+    empty = home_page([]).decode("utf-8")
+    assert "Подключите полётник" in empty
+    assert "<button" not in empty
 
 
 def test_quiet_port_keeps_reading_until_the_prompt():

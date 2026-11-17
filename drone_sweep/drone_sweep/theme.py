@@ -71,7 +71,7 @@ a.action.quiet {
   color: var(--ink);
   border: 1px solid var(--ink);
 }
-a:focus, button:focus, input:focus {
+a:focus, button:focus, input:focus, select:focus {
   outline: 2px solid var(--brass);
   outline-offset: 2px;
 }
@@ -105,7 +105,7 @@ label .title { font-weight: 700; }
 .hole p { margin: 4px 0; }
 label { display: block; margin: 16px 0; max-width: 68ch; }
 .help { display: block; color: var(--quiet); font-size: 14px; }
-input {
+input, select {
   width: 100%;
   margin-top: 4px;
   padding: 8px;
