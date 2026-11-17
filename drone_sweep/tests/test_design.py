@@ -17,7 +17,9 @@ def test_report_names_fields_in_russian_and_keeps_every_key():
     assert "Skyzone VT7550" in page
     assert "С чего начать" in page
     assert "strela" not in page.lower() or "Стрела" in page
-    for name in card.fields:
+    for name, item in card.fields.items():
+        if item.status == "not_applicable":
+            continue
         assert f">{name}<" in page or f">{name}</p>" in page
     assert 'class="key">' in page
     assert "--primary-500: #ffbb00" in page

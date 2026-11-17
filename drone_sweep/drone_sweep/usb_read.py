@@ -256,6 +256,10 @@ class SerialMavlink:
 
         self.raw = raw
         self.mav = dialect.MAVLink(self, srcSystem=255, srcComponent=190)
+        # Boot text and a torn frame share the USB stream. Without this flag
+        # parse_buffer raises MAVError on a byte that is not 0xFD or 0xFE
+        # and the whole read dies. pymavlink then reports BAD_DATA instead.
+        self.mav.robust_parsing = True
         self.target_system = int((beat or {}).get("src_system") or 1)
         self.target_component = int((beat or {}).get("src_component") or 1)
         self._queue: list = []
@@ -291,7 +295,21 @@ class SerialMavlink:
         chunk = self.raw.read(8192)
         if not chunk:
             return
-        for message in self.mav.parse_buffer(chunk) or []:
+        try:
+            parsed = self.mav.parse_buffer(chunk) or []
+        except Exception as exc:
+            if exc.__class__.__name__ != "MAVError":
+                raise
+            self.mav.robust_parsing = True
+            self.mav.buf = bytearray()
+            self.mav.buf_index = 0
+            try:
+                parsed = self.mav.parse_buffer(chunk) or []
+            except Exception as again:
+                if again.__class__.__name__ != "MAVError":
+                    raise
+                return
+        for message in parsed:
             if message.get_type() != "BAD_DATA":
                 self._queue.append(message)
 
