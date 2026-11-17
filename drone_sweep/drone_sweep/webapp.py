@@ -217,6 +217,17 @@ def _bundled_elrs_defaults() -> dict[str, str]:
     return {key: str(path) for key, path in default_binding_paths().items()}
 
 
+def _drone_port_select() -> str:
+    choices = _ports(None)
+    if not choices:
+        return "<p class='help'>USB не виден. Подключите полётник кабелем и обновите страницу.</p>"
+    options = "".join(
+        f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
+        for device, label in choices
+    )
+    return f'<label>USB полётник <select name="drone_port">{options}</select></label>'
+
+
 def _dict_source_select() -> str:
     from .strela_bootstrap import list_catalog
 
@@ -244,6 +255,16 @@ def crack_page(result: str = "", prefill_uid: str = "") -> bytes:
 <p class="lede">Как <a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL</a>: сначала файл прошивки приёмника. Из него <code>dump_elrs</code> достаёт UID и, если он записан, пароль WebUI <code>wifi-password</code>. Фразу CIRCL не читает с <code>10.0.0.1</code>: UID — это первые 6 байт MD5, фразу возвращает словарь. Адрес <code>http://10.0.0.1</code> — уже после, чтобы открыть WebUI найденным паролем. <strong>OrangeRX</strong> — DSM, сюда не подходит.</p>
 {bundled_note}
 {result_block}
+<article class="panel wide panel-accent">
+<h2>С дрона по USB</h2>
+<p class="help">Снимаем дамп подключённого полётника и прогоняем байты через <code>dump_elrs</code>, как CIRCL файл. Если в них есть JSON <code>uid</code>, фразу ищет словарь. <code>http://10.0.0.1</code> для этого не открывается.</p>
+<form method="post" action="/crack"{_MULTIPART}>
+<input type="hidden" name="action" value="read_drone">
+{_drone_port_select()}
+{_dict_source_select()}
+<p><button type="submit">Считать с дрона и найти фразу</button></p>
+</form>
+</article>
 <article class="panel wide panel-accent">
 <h2>Фраза из образа</h2>
 <p class="help">Файл с компьютера: <code>.bin</code> или Intel HEX. Сеть приёмника для этого шага не нужна.</p>
