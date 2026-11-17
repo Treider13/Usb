@@ -389,6 +389,37 @@ def explain_page() -> bytes:
 
 class StrelaHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
+        try:
+            self._get()
+        except Exception as exc:
+            self._fail(exc)
+
+    def do_POST(self) -> None:
+        try:
+            self._post()
+        except Exception as exc:
+            self._fail(exc)
+
+    def _fail(self, exc: Exception) -> None:
+        import traceback
+
+        traceback.print_exc()
+        text = html.escape(f"{type(exc).__name__}: {exc}")
+        body = page(
+            "Ошибка",
+            "<h1>Запрос не выполнен</h1>"
+            f"<p><code>{text}</code></p>"
+            "<p>Причина показана выше и в терминале, где запущена Стрела. Обновите страницу и повторите действие.</p>"
+            '<p><a class="action" href="/">На главную</a></p>',
+            connect="",
+            current="/",
+        ).encode("utf-8")
+        try:
+            self._send(500, body)
+        except Exception:
+            traceback.print_exc()
+
+    def _get(self) -> None:
         if self.path in {"/", "/index.html"}:
             self._send(200, home_page())
         elif self.path.startswith("/read"):
@@ -404,7 +435,7 @@ class StrelaHandler(BaseHTTPRequestHandler):
         else:
             self._send(404, page("Нет страницы", "<h1>Такой страницы нет</h1><p><a class=\"action\" href=\"/\">Назад к Стреле</a></p>").encode("utf-8"))
 
-    def do_POST(self) -> None:
+    def _post(self) -> None:
         from .webapp_forms import merge_uploaded_paths, parse_post_body
 
         length = int(self.headers.get("Content-Length", "0"))
