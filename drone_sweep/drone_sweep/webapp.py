@@ -227,15 +227,38 @@ def _dict_source_select() -> str:
     return f'<label>Словари <select name="dict_source">{options}</select></label>'
 
 
-def _drone_port_select() -> str:
+def _drone_port_select(*, required_hint: str = "") -> str:
     choices = _ports(None)
     if not choices:
         return "<p class='help'>USB не виден — подключите полётник и обновите страницу.</p>"
-    options = '<option value="">— не читать USB —</option>' + "".join(
+    options = '<option value="">— только Wi‑Fi / файл —</option>' + "".join(
         f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
         for device, label in choices
     )
-    return f'<label>USB полётник <select name="drone_port">{options}</select></label>'
+    hint = f" {required_hint}" if required_hint else ""
+    return f'<label>USB полётник{hint} <select name="drone_port">{options}</select></label>'
+
+
+def _drone_wifi_fields(*, default_base: bool = False) -> str:
+    base_val = ' value="http://10.0.0.1"' if default_base else ""
+    return f"""
+<label>Адрес WebUI приёмника <span class="help">(по умолчанию <code>10.0.0.1</code> при «Считать с дрона»)</span>
+<input name="radio_base"{base_val} placeholder="http://10.0.0.1"></label>
+<label>Свой пароль WebUI <span class="help">(необязательно — сами пробуем заводской <code>expresslrs</code>)</span>
+<input name="wifi_password" type="password" placeholder="только если меняли" autocomplete="off"></label>
+"""
+
+
+def _flash_drone_footer() -> str:
+    return f"""
+<div class="flash-drone-footer">
+<p class="help">Снизу — с подключённого дрона (USB + Wi‑Fi приёмника, пароль WebUI не нужен):</p>
+{_drone_port_select(required_hint="")}
+{_drone_wifi_fields(default_base=False)}
+{_dict_source_select()}
+<p><button type="submit" name="flash_source" value="drone">Считать с дрона</button></p>
+</div>
+"""
 
 
 def crack_page(result: str = "", prefill_uid: str = "") -> bytes:
@@ -254,17 +277,16 @@ def crack_page(result: str = "", prefill_uid: str = "") -> bytes:
 <h1>Подбор</h1>
 <p class="lede">Словари и ссылки — <a href="/top2026#elrs-wordlists">ТОП 2026 → ELRS</a>. Как <a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL Drone-Forensic elrs/</a>:
 UID из binding phrase, JSON из flash, подбор фразы. Работает для <strong>ExpressLRS</strong> и <strong>MILELRS</strong>.
-<strong>OrangeRX</strong> — протокол DSM, сюда не подходит. Пароль Wi‑Fi не нужен — нужен словарь binding phrase.</p>
+<strong>OrangeRX</strong> — протокол DSM, сюда не подходит. Пароль Wi‑Fi WebUI знать не нужно: читаем приёмник сами, binding phrase подбираем по UID из словаря.</p>
 {bundled_note}
 {result_block}
 <article class="panel wide panel-accent">
 <h2>Считать с борта (USB + Wi‑Fi модуля)</h2>
-<p class="help">Дрон на USB и/или приёмник в Wi‑Fi ExpressLRS RX. Пароль Wi‑Fi — только для WebUI (<code>expresslrs</code>), не binding phrase.</p>
+<p class="help">USB полётник + Wi‑Fi точка приёмника ELRS RX. Свой пароль WebUI вводить не обязательно.</p>
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="read_drone">
 {_drone_port_select()}
-<label>Адрес модуля <input name="radio_base" value="http://10.0.0.1"></label>
-<label>Пароль Wi‑Fi WebUI <input name="wifi_password" type="password" placeholder="expresslrs" autocomplete="off"></label>
+{_drone_wifi_fields(default_base=True)}
 {_dict_source_select()}
 <p><button type="submit">Считать и подобрать фразу</button></p>
 </form>
@@ -276,6 +298,7 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 {_dict_source_select()}
 <label>Образ с ПК <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
 <span class="help">или путь <input name="flash_path"></span>
+{_flash_drone_footer()}
 <label>Словарь с ПК <input type="file" name="binding_wordlist_file" accept=".txt,.lst"></label>
 <span class="help">или путь <input name="binding_wordlist" value="{bundled_wordlist}"></span>
 <label>JSON RAM-таблица <input type="file" name="memory_table_file" accept=".json"></label>
@@ -296,9 +319,10 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 <h2>Разбор flash / HEX</h2>
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="dump">
-<label>Файл с ПК <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
-<span class="help">или путь <input name="flash_path"></span>
-<p><button type="submit">Извлечь UID и Wi‑Fi (без пароля)</button></p>
+<label>Путь к .bin или Intel HEX — файл с ПК <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
+<span class="help">или путь на диске <input name="flash_path"></span>
+<p><button type="submit" name="flash_source" value="file">Разобрать файл</button></p>
+{_flash_drone_footer()}
 </form>
 </article>
 <article class="panel">

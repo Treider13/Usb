@@ -183,8 +183,8 @@ def binding_phrase_from_config(config: dict[str, Any]) -> str | None:
     return None
 
 
-def public_extraction_summary(file_bytes: bytes) -> dict[str, Any]:
-    """Как CIRCL extract_elrs, но без wifi-password в ответе."""
+def public_extraction_summary(file_bytes: bytes, *, reveal_wifi_password: bool = False) -> dict[str, Any]:
+    """Как CIRCL extract_elrs; wifi-password только на вкладке Подбор для оператора."""
     scan_bytes, fmt = payload_for_scan(file_bytes)
     md5_hash, sha256_hash = compute_hashes(file_bytes)
     entries = extract_json_objects(scan_bytes)
@@ -202,7 +202,10 @@ def public_extraction_summary(file_bytes: bytes) -> dict[str, Any]:
         if entry.get("wifi_ssid"):
             item["wifi_ssid"] = entry["wifi_ssid"]
         if entry.get("wifi_password"):
-            item["wifi_password_present"] = True
+            if reveal_wifi_password:
+                item["wifi_password"] = entry["wifi_password"]
+            else:
+                item["wifi_password_present"] = True
         if item:
             extracted.append(item)
     return {

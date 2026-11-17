@@ -9,7 +9,7 @@ from typing import Mapping
 
 from .assemble import Inputs, assemble
 from .dump_elrs import public_extraction_summary
-from .elrs_drone_read import read_drone_elrs_html
+from .elrs_drone_read import capture_drone_flash_bytes, read_drone_elrs_html
 from .elrs_assemble import search_binding_sources
 from .elrs_binding import binding_phrase_to_uid, parse_uid_field, uid_bytes_to_hex
 from .elrs_rainbow import build_memory_table, save_memory_table
@@ -94,6 +94,25 @@ def _first_uid_from_summary(summary: dict) -> str | None:
     return None
 
 
+def _resolve_flash_input(
+    form: Mapping[str, str],
+    uploads: Mapping[str, Uploaded],
+) -> tuple[bytes | None, str, str]:
+    """Файл с ПК или чтение с дрона (кнопка «Считать с дрона» внизу формы)."""
+    source = form.get("flash_source", "").strip()
+    if source == "drone":
+        return capture_drone_flash_bytes(dict(form))
+    if source == "file":
+        raw = _flash_bytes(form, uploads)
+        if raw is None:
+            return None, "", "выберите файл .bin / Intel HEX или укажите путь"
+        return raw, "", ""
+    raw = _flash_bytes(form, uploads)
+    if raw is not None:
+        return raw, "", ""
+    return None, "", "выберите файл или нажмите «Считать с дрона» внизу"
+
+
 def _phrase_panel(phrase: str, *, extra: str = "") -> str:
     return (
         "<article class='panel'><h2>Binding phrase</h2>"
@@ -130,16 +149,19 @@ def handle_elrs_form(
             "и ExpressLRS. Этот hex можно вставить в подбор ниже.</p></article>"
         ), dec
     if action in {"dump", "phrase_from_flash"}:
-        raw = _flash_bytes(form, uploads)
+        raw, drone_line, err = _resolve_flash_input(form, uploads)
         if raw is None:
-            return False, "<p class='hole'>Выберите файл .bin или Intel HEX с компьютера (или укажите путь).</p>", ""
-        summary = public_extraction_summary(raw)
+            hint = html.escape(err) if err else "нет данных"
+            return False, f"<p class='hole'>{hint}</p>", ""
+        summary = public_extraction_summary(raw, reveal_wifi_password=True)
         uid_text = _first_uid_from_summary(summary)
         text = html.escape(json.dumps(summary, ensure_ascii=False, indent=2))
+        drone_html = f"<p>{html.escape(drone_line)}</p>" if drone_line else ""
         dump_block = (
-            "<article class='panel'><h2>Из flash (dump_elrs)</h2>"
+            drone_html
+            + "<article class='panel'><h2>Из flash (dump_elrs)</h2>"
             f"<pre>{text}</pre>"
-            "<p class='help'>Пароль Wi‑Fi в карточку не попадает — только флаг wifi_password_present.</p>"
+            "<p class='help'>Здесь показываем пароль WebUI приёмника, если он в конфиге; в карточку вылета он не пишется.</p>"
             "</article>"
         )
         inline_phrase = _binding_phrase_in_summary(summary)
@@ -151,7 +173,20 @@ def handle_elrs_form(
             body = dump_block + uid_line + _phrase_panel(inline_phrase, extra=note)
             return True, body, uid_text or ""
         if action == "dump":
-            return bool(summary.get("extracted")), dump_block + uid_line, uid_text or ""
+            body = dump_block + uid_line
+            if form.get("flash_source") == "drone" and uid_text:
+                try:
+                    uid = parse_uid_field(uid_text)
+                except ValueError:
+                    pass
+                else:
+                    phrase, used, problem = _search_phrase(uid, form, uploads)
+                    if phrase:
+                        extra = f"<p class='help'>Подбор по словарю: {html.escape(used)}.</p>"
+                        return True, body + _phrase_panel(phrase, extra=extra), uid_text
+                    if problem:
+                        body += f"<p class='hole'>{html.escape(problem)}</p>"
+            return bool(summary.get("extracted")), body, uid_text or ""
         if uid_text is None:
             return False, dump_block + "<p class='hole'>В образе не найден UID из шести байт.</p>", ""
         try:
