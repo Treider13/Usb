@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--plan", type=Path)
     build.add_argument("--radio-json", type=Path)
     build.add_argument("--radio-image", type=Path)
+    build.add_argument("--stm32", type=Path, help="сохранённый вывод STM32_Programmer_CLI --connect или st-info --probe")
     build.add_argument("--nameplate", action="append", default=[], help="ключ=текст шильдика, например vtx=Skyzone")
     build.add_argument("--banner", default="")
     build.add_argument("--auth-declined", action="store_true")
@@ -61,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             radio_json=radio_json,
             radio_image=radio_image,
             nameplates=plates,
+            stm32_text=args.stm32.read_text(encoding="utf-8", errors="replace") if args.stm32 else None,
             banner=args.banner,
             auth_declined=args.auth_declined,
         )

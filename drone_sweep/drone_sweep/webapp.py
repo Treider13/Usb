@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -10,81 +11,75 @@ from .assemble import assemble
 from .hints import WORKFLOW
 from .menu import APP_NAME, inputs_from_answers, write_report
 from .report import render_html
+from .theme import page
+
+
+FORM_FIELDS = (
+    ("dump", "dump all полётника", "Файл, который Betaflight или INAV печатает по команде dump all. Если его нет, оставьте пустым."),
+    ("boxnames", "Имена режимов", "Ответ MSP_BOXNAMES. Без него нестандартный режим останется номером."),
+    ("bin", "Лог .BIN", "Файл ArduPilot с полёта. Маршрут ищется здесь в первую очередь."),
+    ("tlog", "Телеметрия .tlog", "Файл наземной станции. Это второй источник маршрута."),
+    ("blackbox", "Blackbox", "Файл .bbl или .txt. Из него берётся заголовок и герцы rc_smoothing."),
+    ("gps_csv", "GPS CSV", "Таблица, которую записал blackbox_decode. Это третий источник маршрута."),
+    ("gpx", "GPX", "Путевые точки. Линия трека в GPX маршрутом полёта не считается."),
+    ("waypoints", "Файл .waypoints", "Миссия. Точкой взлёта не становится."),
+    ("plan", "Файл .plan", "Миссия QGroundControl. Точкой взлёта не становится."),
+    ("radio_json", "Страница приёмника", "JSON, который вы сохранили с http://10.0.0.1. Пароль в файл не кладите."),
+    ("radio_image", "Образ приёмника", "Чтение flash. Программа его не стирает."),
+    ("stm32", "Журнал STM32", "Сохранённый вывод STM32_Programmer_CLI --connect port=SWD или st-info --probe. Стирание и запись не подходят."),
+    ("nameplate_vtx", "Шильдик видеопередатчика", "Текст с корпуса. Это документ, не измеренный канал."),
+    ("nameplate_radio", "Шильдик радиомодуля", "Текст с корпуса. Протокол по нему не называется."),
+    ("nameplate_gimbal", "Шильдик подвеса", "Текст с корпуса. Параметр подвеса остаётся отдельно."),
+    ("out", "Папка отчёта", "Куда положить карточку. Без папки сборка не начнётся."),
+)
 
 
 def home_page() -> bytes:
-    steps = "".join(f"<li>{step}</li>" for step in WORKFLOW)
-    body = f"""<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>{APP_NAME}</title>
-<style>
-body {{ font-family: sans-serif; margin: 32px; max-width: 860px; }}
-a.button {{ display: inline-block; margin-right: 12px; padding: 8px 12px; background: #1f4e79; color: white; text-decoration: none; }}
-label {{ display: block; margin-top: 10px; }}
-input {{ width: 100%; padding: 6px; }}
-</style>
-</head>
-<body>
+    steps = "".join(f"<li>{html.escape(step)}</li>" for step in WORKFLOW)
+    inner = f"""
 <h1>{APP_NAME}</h1>
-<p>Программа читает уже снятые файлы и собирает карточку. Она не подбирает пароль и не пишет в полётник.</p>
-<p><a class="button" href="/assemble">Собрать карточку</a> <a class="button" href="/explain">Подсказки</a></p>
+<p class="lede">Соберите карточку дрона из файлов, которые уже лежат на компьютере. Пустая клетка остаётся пустой и говорит, чего не хватило.</p>
+<div class="actions">
+<a class="action" href="/assemble">Собрать карточку</a>
+<a class="action quiet" href="/explain">Подсказки</a>
+</div>
 <h2>Порядок</h2>
-<ol>{steps}</ol>
-</body>
-</html>
+<ol class="steps">{steps}</ol>
 """
-    return body.encode("utf-8")
+    return page(APP_NAME, inner).encode("utf-8")
 
 
 def form_page() -> bytes:
-    fields = (
-        ("dump", "dump all"),
-        ("boxnames", "имена режимов"),
-        ("bin", ".BIN"),
-        ("tlog", ".tlog"),
-        ("blackbox", "Blackbox"),
-        ("gps_csv", "GPS CSV"),
-        ("gpx", "GPX"),
-        ("waypoints", ".waypoints"),
-        ("plan", ".plan"),
-        ("radio_json", "JSON приёмника"),
-        ("radio_image", "образ приёмника"),
-        ("nameplate_vtx", "шильдик VTX"),
-        ("nameplate_radio", "шильдик радио"),
-        ("nameplate_gimbal", "шильдик подвеса"),
-        ("out", "папка отчёта"),
-    )
     labels = "\n".join(
-        f'<label>{title}<input name="{name}" placeholder="путь на этом компьютере, можно оставить пустым"></label>'
-        for name, title in fields
+        "<label>"
+        f'<span class="title">{html.escape(title)}</span>'
+        f'<span class="help">{html.escape(help_text)}</span>'
+        f'<input name="{html.escape(name)}">'
+        "</label>"
+        for name, title, help_text in FORM_FIELDS
     )
-    body = f"""<!DOCTYPE html>
-<html lang="ru">
-<head><meta charset="utf-8"><title>{APP_NAME} — сборка</title></head>
-<body>
-<h1>Сборка карточки</h1>
-<p>Впишите пути к файлам, которые уже лежат на компьютере. Пустой путь пропускается.</p>
+    inner = f"""
+<h1>Собрать карточку</h1>
+<p class="lede">Впишите пути к файлам на этом компьютере. Пустой путь пропускается. Программа ничего не пишет в полётник.</p>
 <form method="post" action="/assemble">
 {labels}
-<p><button type="submit">Собрать</button></p>
+<p><button type="submit">Собрать карточку</button></p>
 </form>
-<p><a href="/">Назад</a></p>
-</body>
-</html>
+<p><a class="action quiet" href="/">Назад</a></p>
 """
-    return body.encode("utf-8")
+    return page(f"{APP_NAME} — сборка", inner).encode("utf-8")
 
 
 def explain_page() -> bytes:
-    steps = "".join(f"<li>{step}</li>" for step in WORKFLOW)
-    body = f"""<!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8"><title>Подсказки</title></head>
-<body><h1>Подсказки</h1><ol>{steps}</ol>
+    steps = "".join(f"<li>{html.escape(step)}</li>" for step in WORKFLOW)
+    inner = f"""
+<h1>Подсказки</h1>
+<p class="lede">Идите по шагам. Если клетка красная, прочитайте причину и сделайте только то, что написано рядом.</p>
+<ol class="steps">{steps}</ol>
 <p>Если страница приёмника просит пароль, введите его сами один раз. Программа пароли не перебирает.</p>
-<p><a href="/">Назад</a></p></body></html>"""
-    return body.encode("utf-8")
+<p><a class="action quiet" href="/">Назад</a></p>
+"""
+    return page("Подсказки", inner).encode("utf-8")
 
 
 class StrelaHandler(BaseHTTPRequestHandler):
@@ -96,7 +91,7 @@ class StrelaHandler(BaseHTTPRequestHandler):
         elif self.path.startswith("/explain"):
             self._send(200, explain_page())
         else:
-            self._send(404, b"not found")
+            self._send(404, page("Нет страницы", "<h1>Такой страницы нет</h1><p><a class=\"action\" href=\"/\">Назад к Стреле</a></p>").encode("utf-8"))
 
     def do_POST(self) -> None:
         if not self.path.startswith("/assemble"):
@@ -106,13 +101,11 @@ class StrelaHandler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length).decode("utf-8", errors="replace")
         form = {key: values[0] for key, values in parse_qs(raw).items()}
         if not form.get("out", "").strip():
-            self._send(400, "Укажите папку отчёта.".encode("utf-8"))
+            self._send(400, page("Нужна папка", "<h1>Укажите папку отчёта</h1><p><a class=\"action\" href=\"/assemble\">Назад к форме</a></p>").encode("utf-8"))
             return
         card = assemble(inputs_from_answers(form))
-        page = write_report(card, Path(form["out"].strip()))
-        html = render_html(card)
-        note = f"<p>Файл отчёта: {page}</p>".encode("utf-8")
-        self._send(200, note + html.encode("utf-8"))
+        saved = write_report(card, Path(form["out"].strip()))
+        self._send(200, render_html(card, saved_path=str(saved)).encode("utf-8"))
 
     def log_message(self, fmt: str, *args) -> None:
         return

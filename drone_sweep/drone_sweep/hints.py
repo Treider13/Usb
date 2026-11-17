@@ -14,6 +14,7 @@ WORKFLOW = [
     "Шильдик видеопередатчика введите вручную. У Betaflight частота берётся из vtx_freq, а если он 0 — из vtxtable по vtx_band и vtx_channel (нумерация с 1). Строка vtx в dump all — это правило AUX, не текущий канал.",
     "У ArduPilot частота берётся из VTX_FREQ. Если его нет, Стрела смотрит VTX_BAND и VTX_CHANNEL в таблице AP_VideoTX (нумерация с 0). Это сохранённые параметры, не ответ видеопередатчика.",
     "Пакетрейт не склеивается. В карточке отдельно: герцы rc_smoothing из Blackbox, индекс из экспорта пульта, BINDING_RATE или rateInitialIdx приёмника, и шаг записей RCIN в .BIN. Шаг RCIN — это период лога, не скорость радиолинии.",
+    "Имя чипа STM32 берётся из сохранённого вывода STM32_Programmer_CLI --connect port=SWD или st-info --probe. Стирание и запись программа отклоняет. Само подключение может перезагрузить плату, поэтому сначала снимите dump all.",
 ]
 
 
@@ -27,6 +28,8 @@ def hint_for_hole(text: str) -> str:
         return "Протокол берётся из строки прошивки модуля. Надпись на плате даёт только поле «плата»."
     if "vtx" in lower or "видео" in lower or "канал" in lower:
         return "Модель видеопередатчика впишите с шильдика. Канал появится после dump all или таблицы VX приёмника."
+    if "stm32" in lower or "программат" in lower or "стиран" in lower:
+        return "Сохраните вывод STM32_Programmer_CLI --connect port=SWD или st-info --probe. Не добавляйте --erase и --download: эти команды стирают или пишут память."
     if "приём" in lower or "rx" in lower or "serial" in lower or "порт" in lower:
         return "Порт приёмника смотрите в поле receiver_port. Его номер берётся из dump all или из SERIALn_PROTOCOL. Проход UART и пайка — ваши действия, программа их не выполняет."
     return "Оставьте поле пустым и сохраните причину. Не подставляйте типичное значение."

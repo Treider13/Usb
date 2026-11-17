@@ -18,6 +18,7 @@ from .mission_files import parse_gpx, parse_plan, parse_qgc_waypoints
 from .model import Card, confirmed, document, missing, not_applicable
 from .ports import ardupilot_ports, decode_osd_position, parse_betaflight_serial
 from .radio import parse_radio_image, parse_radio_json
+from .stm32 import parse_stm32_log
 from .route import (
     arm_pairs,
     bin_gps_points,
@@ -42,6 +43,7 @@ class Inputs:
     radio_json: Any = None
     radio_image: bytes | None = None
     nameplates: dict[str, str] = field(default_factory=dict)
+    stm32_text: str | None = None
     banner: str = ""
     auth_declined: bool = False
 
@@ -71,6 +73,7 @@ def assemble(inputs: Inputs) -> Card:
     _vehicle_fields(card, dump, rows)
     _radio_fields(card, inputs)
     _nameplates(card, inputs.nameplates)
+    _stm32(card, inputs.stm32_text)
     _route(card, inputs, rows)
     _applicability(card)
     _holes(card)
@@ -518,6 +521,25 @@ def _radio_fields(card: Card, inputs: Inputs) -> None:
                 f"radio_{key}",
                 not_applicable(f"словарь MILELRS не применяется к {reading.firmware}", "radio"),
             )
+
+
+def _stm32(card: Card, text: str | None) -> None:
+    if text is None:
+        return
+    parsed = parse_stm32_log(text)
+    if parsed is None:
+        card.put("stm32_probe", missing("в файле нет строк Device ID и нет строк st-info --probe", "stm32 log"))
+        return
+    card.put(
+        "stm32_probe",
+        confirmed(parsed, "stm32 log", "строки подключения STM32_Programmer_CLI или st-info, без чтения памяти прошивки"),
+    )
+    if parsed.get("log_contains_write"):
+        card.put(
+            "stm32_log_contains_write",
+            confirmed(True, "stm32 log", "в журнале есть стирание или запись. Стрела эту команду не повторяет."),
+        )
+        card.holes.append("Журнал STM32 содержит стирание или запись. Идентификатор чипа сохранён, команда не повторяется.")
 
 
 def _nameplates(card: Card, plates: dict[str, str]) -> None:

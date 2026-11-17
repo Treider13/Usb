@@ -30,6 +30,7 @@ QUESTIONS = (
     ("nameplate_vtx", "Шильдик видеопередатчика"),
     ("nameplate_radio", "Шильдик радиомодуля"),
     ("nameplate_gimbal", "Шильдик подвеса"),
+    ("stm32", "Файл журнала STM32_Programmer_CLI или st-info. Enter — пропустить"),
     ("out", "Папка отчёта"),
 )
 
@@ -65,6 +66,7 @@ def inputs_from_answers(answers: dict[str, str]) -> Inputs:
         radio_json=radio_json,
         radio_image=image_path.read_bytes() if image_path else None,
         nameplates=plates,
+        stm32_text=text_of(path_of("stm32")),
         auth_declined=answers.get("auth_declined", "").strip() in {"1", "yes", "да"},
     )
 
