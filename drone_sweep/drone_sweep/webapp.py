@@ -217,6 +217,17 @@ def _bundled_elrs_defaults() -> dict[str, str]:
     return {key: str(path) for key, path in default_binding_paths().items()}
 
 
+def _drone_port_select() -> str:
+    choices = _ports(None)
+    if not choices:
+        return "<p class='help'>USB не виден. Подключите полётник кабелем и обновите страницу.</p>"
+    options = "".join(
+        f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
+        for device, label in choices
+    )
+    return f'<label>USB полётник <select name="drone_port">{options}</select></label>'
+
+
 def _dict_source_select() -> str:
     from .strela_bootstrap import list_catalog
 
@@ -225,40 +236,6 @@ def _dict_source_select() -> str:
         for key, label in list_catalog()
     )
     return f'<label>Словари <select name="dict_source">{options}</select></label>'
-
-
-def _drone_port_select(*, required_hint: str = "") -> str:
-    choices = _ports(None)
-    if not choices:
-        return "<p class='help'>USB не виден — подключите полётник и обновите страницу.</p>"
-    options = '<option value="">— только Wi‑Fi / файл —</option>' + "".join(
-        f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
-        for device, label in choices
-    )
-    hint = f" {required_hint}" if required_hint else ""
-    return f'<label>USB полётник{hint} <select name="drone_port">{options}</select></label>'
-
-
-def _drone_wifi_fields(*, default_base: bool = False) -> str:
-    base_val = ' value="http://10.0.0.1"' if default_base else ""
-    return f"""
-<label>Адрес WebUI приёмника <span class="help">(по умолчанию <code>10.0.0.1</code> при «Считать с дрона»)</span>
-<input name="radio_base"{base_val} placeholder="http://10.0.0.1"></label>
-<label>Свой пароль WebUI <span class="help">(необязательно — сами пробуем заводской <code>expresslrs</code>)</span>
-<input name="wifi_password" type="password" placeholder="только если меняли" autocomplete="off"></label>
-"""
-
-
-def _flash_drone_footer() -> str:
-    return f"""
-<div class="flash-drone-footer">
-<p class="help">Снизу — с подключённого дрона (USB + Wi‑Fi приёмника, пароль WebUI не нужен):</p>
-{_drone_port_select(required_hint="")}
-{_drone_wifi_fields(default_base=False)}
-{_dict_source_select()}
-<p><button type="submit" name="flash_source" value="drone">Считать с дрона</button></p>
-</div>
-"""
 
 
 def crack_page(result: str = "", prefill_uid: str = "") -> bytes:
@@ -275,30 +252,28 @@ def crack_page(result: str = "", prefill_uid: str = "") -> bytes:
         )
     inner = f"""
 <h1>Подбор</h1>
-<p class="lede">Словари и ссылки — <a href="/top2026#elrs-wordlists">ТОП 2026 → ELRS</a>. Как <a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL Drone-Forensic elrs/</a>:
-UID из binding phrase, JSON из flash, подбор фразы. Работает для <strong>ExpressLRS</strong> и <strong>MILELRS</strong>.
-<strong>OrangeRX</strong> — протокол DSM, сюда не подходит. Пароль Wi‑Fi WebUI знать не нужно: читаем приёмник сами, binding phrase подбираем по UID из словаря.</p>
+<p class="lede">Как <a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL</a>: сначала файл прошивки приёмника. Из него <code>dump_elrs</code> достаёт UID и, если он записан, пароль WebUI <code>wifi-password</code>. Фразу CIRCL не читает с <code>10.0.0.1</code>: UID — это первые 6 байт MD5, фразу возвращает словарь. Адрес <code>http://10.0.0.1</code> — уже после, чтобы открыть WebUI найденным паролем. <strong>OrangeRX</strong> — DSM, сюда не подходит.</p>
 {bundled_note}
 {result_block}
 <article class="panel wide panel-accent">
-<h2>Считать с борта (USB + Wi‑Fi модуля)</h2>
-<p class="help">USB полётник + Wi‑Fi точка приёмника ELRS RX. Свой пароль WebUI вводить не обязательно.</p>
+<h2>С дрона по USB</h2>
+<p class="help">Снимаем дамп подключённого полётника и прогоняем байты через <code>dump_elrs</code>, как CIRCL файл. Если в них есть JSON <code>uid</code>, фразу ищет словарь. <code>http://10.0.0.1</code> для этого не открывается.</p>
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="read_drone">
 {_drone_port_select()}
-{_drone_wifi_fields(default_base=True)}
 {_dict_source_select()}
-<p><button type="submit">Считать и подобрать фразу</button></p>
+<p><button type="submit">Считать с дрона и найти фразу</button></p>
 </form>
 </article>
 <article class="panel wide panel-accent">
-<h2>Фраза из образа за один шаг</h2>
+<h2>Фраза из образа</h2>
+<p class="help">Файл с компьютера: <code>.bin</code> или Intel HEX. Сеть приёмника для этого шага не нужна.</p>
 <form method="post" action="/crack"{_MULTIPART}>
 <input type="hidden" name="action" value="phrase_from_flash">
+<input type="hidden" name="flash_source" value="file">
 {_dict_source_select()}
 <label>Образ с ПК <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
 <span class="help">или путь <input name="flash_path"></span>
-{_flash_drone_footer()}
 <label>Словарь с ПК <input type="file" name="binding_wordlist_file" accept=".txt,.lst"></label>
 <span class="help">или путь <input name="binding_wordlist" value="{bundled_wordlist}"></span>
 <label>JSON RAM-таблица <input type="file" name="memory_table_file" accept=".json"></label>
@@ -322,7 +297,6 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 <label>Путь к .bin или Intel HEX — файл с ПК <input type="file" name="flash_file" accept=".bin,.hex,.txt"></label>
 <span class="help">или путь на диске <input name="flash_path"></span>
 <p><button type="submit" name="flash_source" value="file">Разобрать файл</button></p>
-{_flash_drone_footer()}
 </form>
 </article>
 <article class="panel">
@@ -388,7 +362,53 @@ def explain_page() -> bytes:
 
 
 class StrelaHandler(BaseHTTPRequestHandler):
+    # Как штатный http.server и ответы ExpressLRS с Connection: close:
+    # HTTP/1.0, одно соединение на запрос. HTTP/1.1 здесь обрывает форму.
+    protocol_version = "HTTP/1.0"
+
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except Exception as exc:
+            self._fail(exc)
+
     def do_GET(self) -> None:
+        try:
+            self._get()
+        except Exception as exc:
+            self._fail(exc)
+
+    def do_POST(self) -> None:
+        try:
+            self._post()
+        except Exception as exc:
+            self._fail(exc)
+
+    def _fail(self, exc: Exception) -> None:
+        import traceback
+
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+            print("Браузер закрыл страницу до конца ответа.", flush=True)
+            return
+        traceback.print_exc()
+        text = html.escape(f"{type(exc).__name__}: {exc}")
+        body = page(
+            "Ошибка",
+            "<h1>Запрос не выполнен</h1>"
+            f"<p><code>{text}</code></p>"
+            "<p>Причина показана выше и в терминале, где запущена Стрела. Обновите страницу и повторите действие.</p>"
+            '<p><a class="action" href="/">На главную</a></p>',
+            connect="",
+            current="/",
+        ).encode("utf-8")
+        try:
+            self._send(500, body)
+        except (BrokenPipeError, ConnectionResetError):
+            print("Браузер закрыл страницу до конца ответа.", flush=True)
+        except Exception:
+            traceback.print_exc()
+
+    def _get(self) -> None:
         if self.path in {"/", "/index.html"}:
             self._send(200, home_page())
         elif self.path.startswith("/read"):
@@ -404,7 +424,7 @@ class StrelaHandler(BaseHTTPRequestHandler):
         else:
             self._send(404, page("Нет страницы", "<h1>Такой страницы нет</h1><p><a class=\"action\" href=\"/\">Назад к Стреле</a></p>").encode("utf-8"))
 
-    def do_POST(self) -> None:
+    def _post(self) -> None:
         from .webapp_forms import merge_uploaded_paths, parse_post_body
 
         length = int(self.headers.get("Content-Length", "0"))
@@ -458,9 +478,11 @@ class StrelaHandler(BaseHTTPRequestHandler):
         return
 
     def _send(self, code: int, body: bytes, content_type: str = "text/html; charset=utf-8") -> None:
+        self.close_connection = True
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -485,8 +507,12 @@ def serve(port: int = 8765) -> None:
     try:
         server = ThreadingHTTPServer(("127.0.0.1", port), StrelaHandler)
     except OSError as exc:
-        raise ServeError(f"Адрес 127.0.0.1:{port} занят ({exc}).") from exc
+        raise ServeError(
+            f"Адрес 127.0.0.1:{port} занят ({exc}). Старый процесс ещё слушает порт. "
+            f"Остановите его: fuser -k {port}/tcp"
+        ) from exc
     print(f"{APP_NAME}: http://127.0.0.1:{port}", flush=True)
+    print("Сборка: формы без cgi. Ошибка запроса пишется на страницу и в этот терминал.", flush=True)
     print("Остановка: Ctrl+C", flush=True)
     try:
         server.serve_forever()

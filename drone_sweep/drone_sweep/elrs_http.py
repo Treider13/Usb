@@ -5,14 +5,20 @@ Current firmware: GET /config, GET /options.json, GET /hardware.json.
 ExpressLRS 3.0.0 also answers GET /target and GET /mode.json.
 /networks.json starts a Wi-Fi scan, so it is not called.
 /update, /reboot, /reset, /cw and /sethome change the device and are not called.
+
+The device WebUI loads JSON with fetch(url) in src/html/src/utils/feedback.js:
+one HTTP/1.1 GET, Accept */*, no Connection: close. http.client.HTTPConnection
+sends that request. A dropped socket is retried, the same as refreshing the page.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
+from base64 import b64encode
 from typing import Any, Callable
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 
 READ_PATHS = ("/config", "/options.json", "/hardware.json", "/target", "/mode.json")
@@ -31,11 +37,26 @@ def _join(base: str, path: str) -> str:
     return base.rstrip("/") + path
 
 
-def fetch_pages(base: str, opener: Callable[..., Any] | None = None, timeout: float = 5.0) -> dict[str, Any]:
-    """GET the three read endpoints. A 401 stops the session."""
+def fetch_pages(base: str, opener: Callable[..., Any] | None = None, timeout: float = 2.0) -> dict[str, Any]:
+    """Сначала /config, как loadJSON в WebUI. Если его нет, остальные адреса не трогаем."""
     fetch = opener or _open
     pages: dict[str, Any] = {}
+    config_url = _join(base, "/config")
+    try:
+        payload = fetch(config_url, timeout=timeout)
+    except HTTPError as exc:
+        if exc.code == 401:
+            raise RadioAuthRequired(config_url) from exc
+        pages["/config"] = None
+        return pages
+    if isinstance(payload, (bytes, str)):
+        text = payload.decode("utf-8") if isinstance(payload, bytes) else payload
+        pages["/config"] = json.loads(text) if text.strip() else None
+    else:
+        pages["/config"] = payload
     for path in READ_PATHS:
+        if path == "/config":
+            continue
         if path in FORBIDDEN_PATHS:
             raise RuntimeError(path)
         url = _join(base, path)
@@ -46,6 +67,9 @@ def fetch_pages(base: str, opener: Callable[..., Any] | None = None, timeout: fl
                 raise RadioAuthRequired(url) from exc
             pages[path] = None
             continue
+        except OSError:
+            pages[path] = None
+            continue
         if isinstance(payload, (bytes, str)):
             text = payload.decode("utf-8") if isinstance(payload, bytes) else payload
             pages[path] = json.loads(text) if text.strip() else None
@@ -54,22 +78,51 @@ def fetch_pages(base: str, opener: Callable[..., Any] | None = None, timeout: fl
     return pages
 
 
+def _browser_get(url: str, timeout: float, password: str = "") -> tuple[int, bytes]:
+    """Тот же GET, что fetch() в WebUI ExpressLRS: HTTP/1.1, без Connection: close."""
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    port = parts.port or 80
+    path = parts.path or "/"
+    if parts.query:
+        path = f"{path}?{parts.query}"
+    headers = {"Accept": "*/*"}
+    if password:
+        token = b64encode(f":{password}".encode("ascii", errors="ignore")).decode("ascii")
+        headers["Authorization"] = f"Basic {token}"
+    connection = http.client.HTTPConnection(host, port, timeout=timeout)
+    try:
+        connection.request("GET", path, headers=headers)
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
+def _open_with_retries(url: str, timeout: float, password: str = "", attempts: int = 2) -> bytes:
+    """Повтор, если модуль закрыл сокет. В браузере это то же самое, что обновить страницу."""
+    last: Exception | None = None
+    for _ in range(attempts):
+        try:
+            code, body = _browser_get(url, timeout, password)
+        except (TimeoutError, OSError) as exc:
+            last = exc
+            continue
+        if code >= 400:
+            raise HTTPError(url, code, "http", hdrs=None, fp=None)
+        return body
+    if last is not None:
+        raise last
+    raise ConnectionResetError("приёмник закрыл соединение")
+
+
 def _open(url: str, timeout: float = 5.0) -> bytes:
-    request = Request(url, method="GET")
-    with urlopen(request, timeout=timeout) as response:
-        return response.read()
+    return _open_with_retries(url, timeout)
 
 
 def _opener_for_password(password: str, timeout: float = 8.0) -> Callable[..., Any]:
-    from base64 import b64encode
-
     def opener(url: str, timeout: float = timeout) -> bytes:
-        request = Request(url, method="GET")
-        if password:
-            token = b64encode(f":{password}".encode("ascii", errors="ignore")).decode("ascii")
-            request.add_header("Authorization", f"Basic {token}")
-        with urlopen(request, timeout=timeout) as response:
-            return response.read()
+        return _open_with_retries(url, timeout, password)
 
     return opener
 
@@ -78,7 +131,7 @@ def fetch_pages_with_passwords(
     base: str,
   *,
     passwords: tuple[str, ...] | None = None,
-    timeout: float = 8.0,
+    timeout: float = 2.0,
 ) -> tuple[dict[str, Any], str]:
     """Читает WebUI. Сначала пароль из формы, затем заводские."""
     tried: list[str] = []

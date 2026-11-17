@@ -1,7 +1,11 @@
 import json
+from http.server import ThreadingHTTPServer
+from threading import Thread
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from drone_sweep.elrs_ui import handle_elrs_form
-from drone_sweep.webapp import crack_page, home_page
+from drone_sweep.webapp import StrelaHandler, crack_page, home_page
 from drone_sweep.webapp_forms import Uploaded, parse_post_body, stash_upload
 
 
@@ -80,6 +84,54 @@ def test_multipart_roundtrip():
     assert fields["action"] == "crack"
     assert fields["uid"] == "79,4,253,130,33,85"
     assert files == {}
+
+
+def test_post_crash_returns_html_instead_of_dropping_the_socket(monkeypatch):
+    def boom(content_type, body):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("drone_sweep.webapp_forms.parse_post_body", boom)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), StrelaHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    try:
+        urlopen(Request(f"http://127.0.0.1:{port}/crack", data=b"action=uid&phrase=test"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8")
+        assert exc.code == 500
+        assert "RuntimeError: boom" in body
+    else:
+        raise AssertionError("сервер должен ответить 500, а не закрыть сокет")
+    finally:
+        server.shutdown()
+
+
+def test_crack_multipart_post_answers():
+    boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="action"\r\n\r\n'
+        "uid\r\n"
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="phrase"\r\n\r\n'
+        "test\r\n"
+        f"--{boundary}--\r\n"
+    ).encode()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), StrelaHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    try:
+        request = Request(
+            f"http://127.0.0.1:{port}/crack",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        page = urlopen(request).read().decode("utf-8")
+    finally:
+        server.shutdown()
+    assert "Десятичный" in page
 
 
 def test_stash_upload_writes_temp_file():

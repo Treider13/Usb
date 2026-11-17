@@ -2,6 +2,36 @@ from drone_sweep.elrs_ui import handle_elrs_form
 from drone_sweep.webapp import crack_page, crack_response
 
 
+def test_uid_table_answers_without_scanning_the_wordlist(tmp_path):
+    import json
+
+    from drone_sweep.elrs_assemble import search_binding_sources
+    from drone_sweep.elrs_binding import binding_phrase_to_uid, binding_phrase_uid_hex
+
+    table = tmp_path / "mem.json"
+    table.write_text(
+        json.dumps({binding_phrase_uid_hex("other"): "other"}) + "\n",
+        encoding="utf-8",
+    )
+    words = tmp_path / "w.txt"
+    words.write_text("test\n", encoding="utf-8")
+    phrase, _used, problem = search_binding_sources(binding_phrase_to_uid("test"), words, table)
+    assert phrase is None
+    assert "нет фразы" in problem
+
+
+def test_huge_wordlist_is_not_scanned_in_the_request(tmp_path, monkeypatch):
+    from drone_sweep.elrs_assemble import search_binding_sources
+    from drone_sweep.elrs_binding import binding_phrase_to_uid
+
+    monkeypatch.setattr("drone_sweep.elrs_assemble._WORDLIST_SCAN_MAX_BYTES", 4)
+    words = tmp_path / "rockyou.txt"
+    words.write_text("test\n", encoding="utf-8")
+    phrase, _used, problem = search_binding_sources(binding_phrase_to_uid("test"), words, None)
+    assert phrase is None
+    assert "большой" in problem
+
+
 def test_crack_page_has_nav_tab():
     body = crack_page().decode("utf-8")
     assert "Подбор" in body
@@ -9,6 +39,9 @@ def test_crack_page_has_nav_tab():
     assert "aria-current" in body
     assert "CIRCL" in body or "circl" in body.lower()
     assert "OrangeRX" in body
+    assert 'value="read_drone"' in body
+    assert "Считать с дрона" in body
+    assert 'value="http://10.0.0.1"' not in body
 
 
 def test_handle_uid_action():

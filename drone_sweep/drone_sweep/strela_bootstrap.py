@@ -128,9 +128,11 @@ def search_binding_installed(
     order = [key for key in ("combined", "elrs_rainbow", "rockyou", "passhelp", "dwyl") if key in sources]
     problems: list[str] = []
     for key in order:
-        entry = sources[key]
-        wl = Path(entry["wordlist"])
-        tb = Path(entry["memory_table"])
+        entry = sources[key] if isinstance(sources[key], dict) else {}
+        wordlist = entry.get("wordlist") or ""
+        table = entry.get("memory_table") or ""
+        wl = Path(wordlist) if wordlist else None
+        tb = Path(table) if table else None
         phrase, used, problem = search_binding_sources(uid, wl, tb)
         if phrase:
             return phrase, f"{key} ({used})", ""
