@@ -8,7 +8,6 @@ from pathlib import Path
 
 from .assemble import Inputs, assemble
 from .dump_elrs import public_extraction_summary
-from .elrs_assemble import BINDING_UID_PROTOCOLS
 from .elrs_binding import binding_phrase_to_uid, parse_uid_bytes, uid_bytes_to_hex
 from .elrs_rainbow import (
     build_memory_table,
@@ -40,10 +39,7 @@ def handle_elrs_form(form: dict[str, str]) -> tuple[bool, str]:
         return True, (
             "<article class='panel'><h2>UID</h2>"
             f"<p>Десятичный: <code>{html.escape(dec)}</code></p>"
-            f"<p>Hex: <code>{html.escape(hexc)}</code></p>"
-            "<p class='help'>Та же формула, что в "
-            '<a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL Drone-Forensic</a> '
-            "и ExpressLRS.</p></article>"
+            f"<p>Hex: <code>{html.escape(hexc)}</code></p></article>"
         )
     if action == "dump":
         path = _path_field(form, "flash_path")
@@ -128,18 +124,6 @@ def handle_elrs_form(form: dict[str, str]) -> tuple[bool, str]:
                 binding_memory_table=_path_field(form, "assemble_memory"),
             )
         )
-        protocol = card.fields.get("radio_protocol")
-        proto = str(protocol.value) if protocol and protocol.status == "confirmed" else None
-        if form.get("assemble_wordlist") or form.get("assemble_memory"):
-            if proto and proto not in BINDING_UID_PROTOCOLS:
-                note = (
-                    f"<p class='help'>Протокол {html.escape(proto)}: подбор UID как у CIRCL "
-                    f"только для ExpressLRS/MILELRS. OrangeRX — DSM, не ELRS.</p>"
-                )
-            else:
-                note = ""
-        else:
-            note = ""
         saved = write_report(card, out)
-        return True, note + render_html(card, saved_path=str(saved))
+        return True, render_html(card, saved_path=str(saved))
     return False, "<p class='hole'>Неизвестное действие.</p>"
