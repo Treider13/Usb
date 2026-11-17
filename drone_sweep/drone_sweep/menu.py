@@ -87,7 +87,8 @@ def explain_text() -> str:
     lines = [f"{APP_NAME}. Карточка собирается из файлов. Пустое поле остаётся пустым.", ""]
     lines.extend(f"{index}. {line}" for index, line in enumerate(WORKFLOW, start=1))
     lines.append("")
-    lines.append("Пароль страницы приёмника вводится один раз. Подбор не запускается.")
+    lines.append("Пароль страницы приёмника вводится один раз. Сам он не подбирается.")
+    lines.append("Фраза привязки ExpressLRS ищется только если указан словарь или JSON-таблица. Текст фразы в карточку не пишется.")
     lines.append("Команды set, save, reboot и reset в приёмник и полётник не отправляются.")
     return "\n".join(lines)
 

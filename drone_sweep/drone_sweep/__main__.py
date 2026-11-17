@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument(
         "--binding-memory-table",
         type=Path,
-        help="JSON radужной таблицы в RAM (strela elrs build-memory --out)",
+        help="JSON радужной таблицы в RAM (strela elrs build-memory --out)",
     )
     build.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)

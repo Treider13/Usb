@@ -188,7 +188,7 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
 <h2>Подбор фразы по UID</h2>
 <form method="post" action="/crack">
 <input type="hidden" name="action" value="crack">
-<label>UID (6 байт, через запятую) <input name="uid" placeholder="79,4,253,130,33,85"></label>
+<label>UID (6 байт через запятую или hex 4F04FD822155) <input name="uid" placeholder="79,4,253,130,33,85"></label>
 <label>Словарь <input name="binding_wordlist"></label>
 <label>или JSON таблица <input name="memory_table"></label>
 <p><button type="submit">Подобрать</button></p>
@@ -258,11 +258,7 @@ class StrelaHandler(BaseHTTPRequestHandler):
             self._read_usb(form)
             return
         if self.path.startswith("/crack"):
-            from .elrs_ui import handle_elrs_form
-
-            _ok, fragment = handle_elrs_form(form)
-            body = crack_page(fragment)
-            self._send(200, body)
+            self._send(200, crack_response(form))
             return
         if not self.path.startswith("/assemble"):
             self._send(404, b"not found")
@@ -304,6 +300,15 @@ class StrelaHandler(BaseHTTPRequestHandler):
 
 class ServeError(Exception):
     pass
+
+
+def crack_response(form: dict[str, str]) -> bytes:
+    from .elrs_ui import handle_elrs_form
+
+    _ok, fragment = handle_elrs_form(form)
+    if fragment.lstrip().startswith("<!DOCTYPE"):
+        return fragment.encode("utf-8")
+    return crack_page(fragment)
 
 
 def serve(port: int = 8765) -> None:

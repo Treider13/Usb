@@ -8,16 +8,9 @@ from pathlib import Path
 
 from .assemble import Inputs, assemble
 from .dump_elrs import public_extraction_summary
-from .elrs_assemble import BINDING_UID_PROTOCOLS
-from .elrs_binding import binding_phrase_to_uid, parse_uid_bytes, uid_bytes_to_hex
-from .elrs_rainbow import (
-    build_memory_table,
-    crack_binding_phrase,
-    crack_binding_phrase_from_store,
-    load_memory_table,
-    lookup_binding_phrase,
-    save_memory_table,
-)
+from .elrs_assemble import search_binding_sources
+from .elrs_binding import binding_phrase_to_uid, parse_uid_field, uid_bytes_to_hex
+from .elrs_rainbow import build_memory_table, save_memory_table
 from .menu import write_report
 from .report import render_html
 
@@ -61,26 +54,19 @@ def handle_elrs_form(form: dict[str, str]) -> tuple[bool, str]:
     if action == "crack":
         uid_text = form.get("uid", "").strip()
         if not uid_text:
-            return False, "<p class='hole'>Введите шесть байт UID через запятую.</p>"
+            return False, "<p class='hole'>Введите UID: шесть байт через запятую или 12 символов hex.</p>"
         try:
-            uid = parse_uid_bytes(uid_text)
+            uid = parse_uid_field(uid_text)
         except ValueError as exc:
             return False, f"<p class='hole'>{html.escape(str(exc))}</p>"
-        phrase: str | None = None
         memory = _path_field(form, "memory_table")
         wordlist = _path_field(form, "binding_wordlist")
-        if memory is not None:
-            if not memory.is_file():
-                return False, "<p class='hole'>Файл RAM-таблицы не найден.</p>"
-            phrase = lookup_binding_phrase(uid, load_memory_table(memory))
-        elif wordlist is not None:
-            if not wordlist.is_file():
-                return False, "<p class='hole'>Словарь не найден.</p>"
-            phrase = crack_binding_phrase(uid, wordlist)
-        else:
+        if memory is None and wordlist is None:
             return False, "<p class='hole'>Укажите словарь или JSON таблицу (build-memory --out).</p>"
+        phrase, _source, problem = search_binding_sources(uid, wordlist, memory)
         if phrase is None:
-            return False, "<p class='hole'>Фраза для этого UID не найдена.</p>"
+            detail = problem or "Фраза для этого UID не найдена."
+            return False, f"<p class='hole'>{html.escape(detail)}</p>"
         return True, (
             "<article class='panel'><h2>Найдена binding phrase</h2>"
             f"<p><code>{html.escape(phrase)}</code></p>"
@@ -111,7 +97,10 @@ def handle_elrs_form(form: dict[str, str]) -> tuple[bool, str]:
         if radio_json_path is not None:
             if not radio_json_path.is_file():
                 return False, "<p class='hole'>JSON приёмника не найден.</p>"
-            radio_json = json.loads(radio_json_path.read_text(encoding="utf-8"))
+            try:
+                radio_json = json.loads(radio_json_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                return False, f"<p class='hole'>JSON приёмника не читается: {html.escape(str(exc))}</p>"
         radio_image = None
         radio_image_path = _path_field(form, "radio_image_path")
         if radio_image_path is not None:
@@ -128,18 +117,8 @@ def handle_elrs_form(form: dict[str, str]) -> tuple[bool, str]:
                 binding_memory_table=_path_field(form, "assemble_memory"),
             )
         )
-        protocol = card.fields.get("radio_protocol")
-        proto = str(protocol.value) if protocol and protocol.status == "confirmed" else None
-        if form.get("assemble_wordlist") or form.get("assemble_memory"):
-            if proto and proto not in BINDING_UID_PROTOCOLS:
-                note = (
-                    f"<p class='help'>Протокол {html.escape(proto)}: подбор UID как у CIRCL "
-                    f"только для ExpressLRS/MILELRS. OrangeRX — DSM, не ELRS.</p>"
-                )
-            else:
-                note = ""
-        else:
-            note = ""
         saved = write_report(card, out)
-        return True, note + render_html(card, saved_path=str(saved))
+        # A full report page. The caller must send it as the whole response,
+        # not inside the Подбор sheet.
+        return True, render_html(card, saved_path=str(saved))
     return False, "<p class='hole'>Неизвестное действие.</p>"

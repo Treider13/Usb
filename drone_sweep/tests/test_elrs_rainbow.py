@@ -29,6 +29,7 @@ def test_hash_batch_matches_circl_hash_batch():
 def test_parse_uid_formats():
     assert parse_uid_bytes("79,4,253,130,33,85") == [79, 4, 253, 130, 33, 85]
     assert parse_uid_field("4F,04,FD,82,21,55") == [0x4F, 0x04, 0xFD, 0x82, 0x21, 0x55]
+    assert parse_uid_field("4F04FD822155") == [0x4F, 0x04, 0xFD, 0x82, 0x21, 0x55]
 
 
 def test_crack_and_memory_rainbow(tmp_path: Path):
