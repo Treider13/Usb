@@ -77,7 +77,7 @@ def try_binding_phrase_crack(
 
 
 def _refusal(protocol: str | None) -> str:
-    if protocol in {"SPEKTRUM2048", "SPEKTRUM1024"}:
+    if protocol in {"SPEKTRUM2048", "SPEKTRUM1024", "SPEKTRUM", "DSM"}:
         return (
             "подбор UID по фразе только для ExpressLRS и MILELRS. "
             f"{protocol} — класс DSM2/DSMX, приёмники OrangeRX входят в него. Формула ELRS к ним не применяется."
