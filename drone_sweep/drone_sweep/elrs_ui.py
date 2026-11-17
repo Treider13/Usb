@@ -38,6 +38,14 @@ def _flash_bytes(form: Mapping[str, str], files: Mapping[str, Uploaded]) -> byte
     return None
 
 
+def _binding_phrase_in_summary(summary: dict) -> str | None:
+    for item in summary.get("extracted") or []:
+        phrase = item.get("binding_phrase")
+        if isinstance(phrase, str) and phrase.strip():
+            return phrase.strip()
+    return None
+
+
 def _first_uid_from_summary(summary: dict) -> str | None:
     for item in summary.get("extracted") or []:
         uid = item.get("uid")
@@ -92,11 +100,16 @@ def handle_elrs_form(
             "<p class='help'>Пароль Wi‑Fi в карточку не попадает — только флаг wifi_password_present.</p>"
             "</article>"
         )
+        inline_phrase = _binding_phrase_in_summary(summary)
+        uid_line = ""
+        if uid_text:
+            uid_line = f"<p>UID из образа: <code>{html.escape(uid_text)}</code> — подставлен в форму ниже.</p>"
+        if inline_phrase:
+            note = "<p class='help'>Фраза в открытом виде в JSON flash — словарь и Wi‑Fi не нужны.</p>"
+            body = dump_block + uid_line + _phrase_panel(inline_phrase, extra=note)
+            return True, body, uid_text or ""
         if action == "dump":
-            extra = ""
-            if uid_text:
-                extra = f"<p>UID из образа: <code>{html.escape(uid_text)}</code> — подставлен в форму ниже.</p>"
-            return bool(summary.get("extracted")), dump_block + extra, uid_text or ""
+            return bool(summary.get("extracted")), dump_block + uid_line, uid_text or ""
         if uid_text is None:
             return False, dump_block + "<p class='hole'>В образе не найден UID из шести байт.</p>", ""
         wordlist = resolve_upload_path(form, uploads, "binding_wordlist_file", "binding_wordlist")

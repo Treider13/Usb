@@ -278,7 +278,7 @@ def _dispatch(args: list[str]) -> int:
     print(
         "Команды: strela, strela explain, strela serve --port 8765, strela assemble ..., "
         "strela diff a.json b.json, "
-        "strela elrs uid|dump|crack|lookup|lookup-memory|build-rainbow|build-memory ..."
+        "strela elrs uid|dump|crack|lookup|lookup-memory|fetch-wordlist|build-rainbow|build-memory ..."
     )
     return 1
 

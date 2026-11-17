@@ -216,7 +216,7 @@ def crack_page(result: str = "", prefill_uid: str = "") -> bytes:
     uid_value = html.escape(prefill_uid)
     inner = f"""
 <h1>Подбор</h1>
-<p class="lede">Как <a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL Drone-Forensic elrs/</a>:
+<p class="lede">Словари и ссылки — <a href="/top2026#elrs-wordlists">ТОП 2026 → ELRS</a>. Как <a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL Drone-Forensic elrs/</a>:
 UID из binding phrase, JSON из flash, подбор фразы. Работает для <strong>ExpressLRS</strong> и <strong>MILELRS</strong>.
 <strong>OrangeRX</strong> — протокол DSM, сюда не подходит. Пароль Wi‑Fi не нужен — нужен словарь binding phrase.</p>
 {result_block}

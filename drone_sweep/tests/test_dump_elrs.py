@@ -77,6 +77,13 @@ def test_milelrs_binding_crack_with_uid(tmp_path: Path):
     assert card.fields["radio_binding_phrase_crack"].value == "найдена"
 
 
+def test_public_extraction_includes_binding_phrase_from_flash():
+    blob = json.dumps({"uid": [1, 2, 3, 4, 5, 6], "binding-phrase": "from_flash", "wifi-password": "x"}).encode()
+    summary = public_extraction_summary(b"\xff" + blob)
+    assert summary["extracted"][0]["binding_phrase"] == "from_flash"
+    assert "x" not in json.dumps(summary)
+
+
 def test_public_extraction_skips_wifi_password_value():
     blob = json.dumps({"uid": [1, 2, 3, 4, 5, 6], "wifi-password": "secret"}).encode()
     summary = public_extraction_summary(b"\xff" + blob)

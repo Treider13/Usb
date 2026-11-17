@@ -14,6 +14,7 @@ from .dump_elrs import (
     public_extraction_summary,
 )
 from .elrs_binding import binding_phrase_to_uid, parse_uid_bytes, uid_bytes_to_hex
+from .elrs_resources import WORDLIST_PRESETS, fetch_wordlist_preset
 from .elrs_rainbow import (
     build_memory_table,
     build_rainbow_table,
@@ -88,6 +89,17 @@ def main(argv: list[str] | None = None) -> int:
     build_local.add_argument("wordlist", type=Path)
     build_local.add_argument("--out", type=Path, help="куда сохранить JSON для lookup-memory / assemble")
     build_local.add_argument("--encoding", default="utf-8")
+
+    fetch_cmd = sub.add_parser(
+        "fetch-wordlist",
+        help="скачать публичный словарь (passhelp, rockyou) с GitHub",
+    )
+    fetch_cmd.add_argument(
+        "preset",
+        choices=sorted(WORDLIST_PRESETS),
+        help="набор слов для strela elrs crack / build-memory",
+    )
+    fetch_cmd.add_argument("--out", type=Path, required=True, help="куда сохранить .txt")
 
     parsed = parser.parse_args(args)
     if parsed.command == "uid":
@@ -185,6 +197,14 @@ def main(argv: list[str] | None = None) -> int:
             on_progress=progress,
         )
         print(f"готово, обработано {total}")
+        return 0
+    if parsed.command == "fetch-wordlist":
+        try:
+            result = fetch_wordlist_preset(parsed.preset, parsed.out)
+        except (OSError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(f"{result.path} ({result.bytes_written} bytes)")
         return 0
     if parsed.command == "build-memory":
         if not parsed.wordlist.is_file():
