@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--lite",
         action="store_true",
-        help="без rockyou (~14M строк; для ПК с 4–8 ГБ RAM, достаточно для обычных фраз)",
+        help="без rockyou (быстрее; rockyou на 8 ГБ тоже идёт, но долго — SQLite на диске)",
     )
     args = parser.parse_args(argv)
     presets = ("passhelp", "dwyl", "elrs_rainbow") if args.lite else None
