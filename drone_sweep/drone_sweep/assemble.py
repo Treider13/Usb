@@ -6,8 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .ardupilot_vtx import describe as describe_ardupilot_vtx
 from .blackbox import parse_gps_csv, parse_header_file
 from .dump import parse_boxnames, parse_dump
+from .vtx import parse_video_grid, parse_vtx_rules, selected_channel
 from .enums_ardupilot import CAMERA_TYPE_45, MOUNT_TYPE_45, rc_protocols_45
 from .hashing import sha256_bytes, sha256_file
 from .hints import WORKFLOW, hint_for_hole
@@ -128,6 +130,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         card.put("failsafe", confirmed(dump.failsafe, "dump all") if dump.failsafe else missing("в dump all нет failsafe_*", "dump all"))
         card.put("vtxtable", confirmed(dump.vtxtable, "dump all") if dump.vtxtable else missing("в dump all нет vtxtable", "dump all"))
         card.put("vtx", confirmed(dump.vtx, "dump all") if dump.vtx else missing("в dump all нет строк vtx", "dump all"))
+        _betaflight_video(card, dump)
         card.put("osd", confirmed(dump.osd, "dump all") if dump.osd else missing("в dump all нет osd_*", "dump all"))
         provider = dump.settings.get("serialrx_provider")
         if provider is not None:
@@ -165,6 +168,69 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         _known_params(card, params)
         _baro(card, rows)
         _messages_with_rcin(card, rows, messages)
+        _rcin_interval(card, rows)
+
+
+def _betaflight_video(card: Card, dump) -> None:
+    grid = parse_video_grid(dump.vtxtable)
+    if grid.bands:
+        card.put(
+            "video_grid",
+            confirmed(
+                {
+                    "bands": grid.bands,
+                    "power_mw": grid.power_mw,
+                    "power_labels": grid.power_labels,
+                },
+                "dump vtxtable",
+                "частоты в МГц из строк vtxtable band, нумерация диапазонов с 1",
+            ),
+        )
+    selected = selected_channel(dump.settings, grid)
+    if selected["frequency_mhz"] is None and selected["band"] is None and selected["vtx_freq_mhz"] in (None, 0):
+        card.put(
+            "video_frequency_mhz",
+            missing("нет vtx_freq и нет пары vtx_band/vtx_channel, которая есть в vtxtable", "dump all"),
+        )
+    elif selected["frequency_mhz"] is None:
+        card.put(
+            "video_frequency_mhz",
+            missing("vtx_band/vtx_channel не попали в таблицу этого дампа", "dump all"),
+        )
+    else:
+        card.put(
+            "video_frequency_mhz",
+            confirmed(selected["frequency_mhz"], f"dump {selected['frequency_source']}", "сохранённая настройка, не ответ передатчика"),
+        )
+    if selected["power"] is not None:
+        card.put("video_power", confirmed(selected["power"], "dump vtx_power + vtxtable powervalues"))
+    rules = parse_vtx_rules(dump.vtx, grid)
+    if rules:
+        card.put(
+            "vtx_switch_rules",
+            confirmed(rules, "dump vtx", "это условия AUX, не текущий канал"),
+        )
+
+
+def _rcin_interval(card: Card, rows: list[dict]) -> None:
+    stamps = sorted(
+        float(row["TimeUS"])
+        for row in rows
+        if row.get("name") == "RCIN" and row.get("TimeUS") is not None
+    )
+    deltas = [right - left for left, right in zip(stamps, stamps[1:]) if right > left]
+    if not deltas:
+        card.put("rcin_interval_us", missing("в .BIN меньше двух сообщений RCIN", "bin RCIN"))
+        return
+    deltas.sort()
+    card.put(
+        "rcin_interval_us",
+        confirmed(
+            deltas[len(deltas) // 2],
+            "bin RCIN",
+            "медиана шага записей RCIN, не пакетрейт радиолинии",
+        ),
+    )
 
 
 def _serialrx_class(card: Card, provider: str) -> None:
@@ -222,6 +288,32 @@ def _known_params(card: Card, params: dict) -> None:
             "vtx_device_responded",
             missing("опроса видеопередатчика не было. VTX_ENABLE не является ответом устройства.", "bin PARM"),
         )
+    video = describe_ardupilot_vtx(params)
+    if video is not None:
+        card.put(
+            "video_grid_lookup",
+            confirmed(video, "AP_VideoTX VIDEO_CHANNELS + PARM", "сохранённые параметры, не ответ передатчика"),
+        )
+        if video["stored_frequency_mhz"]:
+            card.put("video_frequency_mhz", confirmed(video["stored_frequency_mhz"], "bin PARM VTX_FREQ"))
+        elif video["table_frequency_mhz"] is not None:
+            card.put(
+                "video_frequency_mhz",
+                confirmed(video["table_frequency_mhz"], "AP_VideoTX VIDEO_CHANNELS"),
+            )
+        else:
+            card.put("video_frequency_mhz", missing("VTX_FREQ пуст и BAND/CHANNEL вне таблицы", "bin PARM"))
+        if video["stored_frequency_mhz"] and video["table_frequency_mhz"] not in (None, video["stored_frequency_mhz"]):
+            card.holes.append(
+                "VTX_FREQ и частота из VTX_BAND/VTX_CHANNEL по таблице AP_VideoTX не совпали. Оба значения сохранены."
+            )
+        if video["power_mw"] is not None:
+            card.put("video_power_mw", confirmed(video["power_mw"], "bin PARM VTX_POWER", "милливатты, как в параметре"))
+        if video["pitmode_bit"] is not None:
+            card.put(
+                "vtx_pitmode_configured",
+                confirmed(video["pitmode_bit"], "bin PARM VTX_OPTIONS bit 0", "бит настройки, не ответ устройства"),
+            )
     for name in ("FS_THR_ENABLE", "FS_GCS_ENABLE", "FS_EKF_ACTION", "BATT_FS_CRT_ACT", "FS_CRASH_CHECK"):
         if name in params:
             card.put(name.lower(), confirmed(params[name], "bin PARM"))
@@ -305,14 +397,22 @@ def _radio_fields(card: Card, inputs: Inputs) -> None:
         card.put("radio_protocol", missing("в странице или образе нет строки MILELRS, ExpressLRS или mLRS", "radio"))
         return
     card.put("radio_protocol", confirmed(reading.firmware, "radio firmware string"))
+    rate_reasons = {
+        "rate_index": "номер режима в настройке приёмника, без перевода в герцы",
+        "rateinitialidx": "rateInitialIdx из options, не частота этого вылета",
+        "tx_packet_rate": "значение из экспорта пульта, не частота из лога полёта",
+        "binding_rate": "BINDING_RATE — вариант привязки, не измеренный пакетрейт вылета",
+        "vx_table": "таблица в странице приёмника, не параметр VTX полётника",
+        "vx_bands": "таблица в странице приёмника, не параметр VTX полётника",
+    }
     for key in ("version", "model", "chip", "domain", "uid", "serial_protocol", "uart_baud", "rate_index", "rateinitialidx", "model_id", "tx_packet_rate", "target", "module_type", "git_commit"):
         if key in reading.fields:
-            card.put(f"radio_{key}", confirmed(reading.fields[key], "radio"))
+            card.put(f"radio_{key}", confirmed(reading.fields[key], "radio", rate_reasons.get(key, "")))
     if reading.firmware == "MILELRS":
         for key in ("custom_freq", "binding_rate", "swarm_id", "vx_table", "vx_bands"):
             field_name = f"radio_{key}"
             if key in reading.fields:
-                card.put(field_name, confirmed(reading.fields[key], "radio"))
+                card.put(field_name, confirmed(reading.fields[key], "radio", rate_reasons.get(key, "")))
             else:
                 card.put(field_name, missing(f"прошивка MILELRS, поля {key} в чтении нет", "radio"))
     else:
@@ -390,7 +490,11 @@ def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
             if "rc_smoothing_rx_smoothed" in header:
                 card.put(
                     "packet_rate_log_hz",
-                    confirmed(header["rc_smoothing_rx_smoothed"], "blackbox H", "это не индекс скорости приёмника"),
+                    confirmed(
+                        header["rc_smoothing_rx_smoothed"],
+                        "blackbox H",
+                        "rc_smoothing_rx_smoothed в герцах на момент арминга. Это не индекс ExpressLRS и не шаг RCIN.",
+                    ),
                 )
             if "DeviceUID" in header:
                 card.put("device_uid", confirmed(header["DeviceUID"], "blackbox H"))
