@@ -1,5 +1,7 @@
 """Every printed setting stays on the card. Profiles do not overwrite each other."""
 
+import json
+
 from drone_sweep.assemble import Inputs, assemble, log_inventory
 from drone_sweep.dump import parse_dump
 from drone_sweep.radio import parse_radio_json
@@ -57,6 +59,30 @@ def test_radio_page_keeps_unknown_keys_and_drops_the_password():
     assert "hidden" not in page_text(card)
 
 
+def test_mlrs_cli_keeps_printed_values_and_drops_the_bind_phrase():
+    blob = "\n".join(
+        [
+            "mLRS",
+            "ConfigId:",
+            "1",
+            "  Tx: Matek MR900, v1.4.05",
+            "  Rx: receiver not connected",
+            "  Mode = 50 Hz [0]",
+            "  Bind Phrase = secret-phrase",
+            "  RF Band = - (unavailable)",
+        ]
+    ).encode("ascii")
+    card = assemble(Inputs(radio_image=blob, banner="Betaflight 4.5.0"))
+    assert card.fields["radio_protocol"].value == "mLRS"
+    assert card.fields["radio_page"].value["mode"] == "50 Hz [0]"
+    assert card.fields["radio_page"].value["rf_band"] == "- (unavailable)"
+    assert card.fields["radio_page"].value["tx"] == "Matek MR900, v1.4.05"
+    assert card.fields["radio_binding_rate"].status == "not_applicable"
+    dumped = json.dumps(card.to_dict(), ensure_ascii=False)
+    assert "secret-phrase" not in dumped
+    assert "serialpassthrough" not in dumped
+
+
 def test_log_inventory_lists_every_message_type():
     rows = [{"name": "EV", "TimeUS": 1, "Id": 10}] + [
         {"name": "IMU", "TimeUS": index, "AccX": index} for index in range(31)
@@ -71,6 +97,4 @@ def test_log_inventory_lists_every_message_type():
 
 
 def page_text(card) -> str:
-    import json
-
     return json.dumps(card.to_dict(), ensure_ascii=False)

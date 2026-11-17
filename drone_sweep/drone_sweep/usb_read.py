@@ -87,8 +87,8 @@ def read_boxnames(port: ScriptedPort) -> str:
 
 
 def collect_flight_controller(port) -> tuple[str, str]:
-    """Enter the CLI, read `dump all`, then MSP_BOXNAMES. Nothing is saved."""
-    dump_text = read_cli(port, ["dump all"])
+    """Read version, status and dump all, then MSP_BOXNAMES. Nothing is saved."""
+    dump_text = read_cli(port, ["version", "status", "dump all"])
     boxes = read_boxnames(port)
     return dump_text, boxes
 

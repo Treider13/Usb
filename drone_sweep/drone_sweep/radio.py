@@ -63,6 +63,8 @@ def parse_radio_json(payload: Any) -> RadioReading:
 def parse_radio_image(blob: bytes) -> RadioReading:
     redacted, removed = redact_text_blob(blob)
     text = redacted.decode("latin1", errors="replace")
+    if _mlrs_cli(text):
+        return _parse_mlrs_cli(text, redacted, removed)
     firmware = None
     for name in _FIRMWARES:
         if name == "mLRS":
@@ -84,3 +86,42 @@ def parse_radio_image(blob: bytes) -> RadioReading:
     if version and "version" not in fields:
         fields["version"] = version.group(0)
     return RadioReading(firmware, fields, removed, redacted)
+
+
+_MLRS_PARAM = re.compile(r"^  (.+?) = (.*)$")
+_MLRS_TX = re.compile(r"^  Tx: (.+)$")
+_MLRS_RX = re.compile(r"^  Rx: (.+)$")
+
+
+def _mlrs_cli(text: str) -> bool:
+    """The print format of tTxCli in olliw42/mLRS CommonTx/cli.h."""
+    if re.search(r"MILELRS", text, re.IGNORECASE):
+        return False
+    if re.search(r"(?m)^ConfigId:\s*$", text):
+        return True
+    return bool(re.search(r"(?m)^  Tx: ", text) and re.search(r"(?m)^  .+ = ", text))
+
+
+def _parse_mlrs_cli(text: str, redacted: bytes, removed: list[str]) -> RadioReading:
+    fields: dict[str, str] = {}
+    for raw in text.splitlines():
+        tx = _MLRS_TX.match(raw)
+        if tx:
+            fields["tx"] = tx.group(1).strip()
+            continue
+        rx = _MLRS_RX.match(raw)
+        if rx:
+            fields["rx"] = rx.group(1).strip()
+            continue
+        param = _MLRS_PARAM.match(raw)
+        if not param:
+            continue
+        name = param.group(1).strip().lower().replace(" ", "_")
+        value = param.group(2).strip()
+        if _secret_name(name):
+            removed.append(name)
+            continue
+        fields[name] = value
+    if "version" not in fields and fields.get("tx"):
+        fields["version"] = fields["tx"]
+    return RadioReading("mLRS", fields, removed, redacted)

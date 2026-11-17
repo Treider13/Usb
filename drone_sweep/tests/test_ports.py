@@ -101,6 +101,8 @@ def test_usb_read_sends_dump_all_and_builds_the_card(tmp_path: Path):
     assert boxes == "ARM;ANGLE"
     written = b"".join(port.written)
     assert b"dump all\n" in written
+    assert b"version\n" in written
+    assert b"status\n" in written
     assert b"save" not in written.lower()
     assert b"serialpassthrough" not in written.lower()
     assert msp_request(116) in port.written
@@ -115,7 +117,7 @@ def test_usb_read_sends_dump_all_and_builds_the_card(tmp_path: Path):
 
 def test_usb_without_a_banner_does_not_invent_a_card(tmp_path: Path):
     empty = bytes([ord("$"), ord("M"), ord(">"), 0, 116, 116])
-    port = ScriptedPort(chunks=[b"\r\n", b"hello\r\n", empty])
+    port = ScriptedPort(chunks=[b"\r\n", b"hello\r\n", b"no banner\r\n", b"still no\r\n", empty])
     out = tmp_path / "empty"
     menu = run_menu(["3", "/dev/ttyTEST", str(out), "5"], port_opener=lambda path: port)
     assert "не выдуманы" in menu
@@ -129,7 +131,15 @@ def _scripted_fc() -> ScriptedPort:
     for byte in payload:
         checksum ^= byte
     reply = bytes([ord("$"), ord("M"), ord(">"), size, 116]) + payload + bytes([checksum])
-    return ScriptedPort(chunks=[b"#\r\n", DUMP.encode("ascii"), reply])
+    return ScriptedPort(
+        chunks=[
+            b"#\r\n",
+            b"# Betaflight / STM32F405 4.5.0\r\n#\r\n",
+            b"System Uptime: 10 seconds\r\n#\r\n",
+            DUMP.encode("ascii"),
+            reply,
+        ]
+    )
 
 
 def test_quiet_port_keeps_reading_until_the_prompt():
