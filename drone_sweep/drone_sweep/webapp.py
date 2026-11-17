@@ -72,7 +72,7 @@ def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
 <article class="panel"><h2>Журнал</h2><p>С ArduPilot запрашиваются версия, все параметры и последний журнал .BIN. Если борт взведён, плата журнал не отдаёт, и Стрела взведение не снимает.</p></article>
 <article class="panel"><h2>Карточка</h2><p>Пустая клетка остаётся пустой, рядом причина. Зелёная пометка — значение прочитано. Синяя — надпись с шильдика.</p></article>
 </div>
-<p><a class="action" href="/read">Открыть чтение</a> <a class="action quiet" href="/assemble">Собрать карточку из файлов</a> <a class="action quiet" href="/design/1">Пять видов карточки</a></p>
+<p><a class="action" href="/read">Открыть чтение</a> <a class="action quiet" href="/assemble">Собрать карточку из файлов</a></p>
 """
     return page(APP_NAME, inner, connect=connect_bar(ports), current="/").encode("utf-8")
 
@@ -179,14 +179,6 @@ class StrelaHandler(BaseHTTPRequestHandler):
             self._send(200, form_page())
         elif self.path.startswith("/explain"):
             self._send(200, explain_page())
-        elif self.path.startswith("/design"):
-            from .designs import design_page
-
-            tail = self.path.rstrip("/").rsplit("/", 1)[-1]
-            number = int(tail) if tail.isdigit() else 1
-            if not 1 <= number <= 5:
-                number = 1
-            self._send(200, design_page(number))
         else:
             self._send(404, page("Нет страницы", "<h1>Такой страницы нет</h1><p><a class=\"action\" href=\"/\">Назад к Стреле</a></p>").encode("utf-8"))
 
