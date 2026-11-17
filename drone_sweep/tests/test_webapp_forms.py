@@ -33,6 +33,38 @@ def test_phrase_from_flash_with_uploaded_files(tmp_path):
     assert "secret" not in fragment
 
 
+def test_multipart_file_and_blank_field():
+    boundary = "----bound"
+    body = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="action"\r\n\r\n'
+        "dump\r\n"
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="note"\r\n\r\n'
+        "\r\n"
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="flash_file"; filename="rx.bin"\r\n'
+        "Content-Type: application/octet-stream\r\n\r\n"
+        "abc\r\n"
+        f"--{boundary}--\r\n"
+    ).encode()
+    fields, files = parse_post_body(f'multipart/form-data; boundary="{boundary}"', body)
+    assert fields["action"] == "dump"
+    assert fields["note"] == ""
+    assert files["flash_file"].filename == "rx.bin"
+    assert files["flash_file"].data == b"abc"
+
+
+def test_urlencoded_post():
+    fields, files = parse_post_body(
+        "application/x-www-form-urlencoded",
+        b"action=uid&phrase=test",
+    )
+    assert fields["action"] == "uid"
+    assert fields["phrase"] == "test"
+    assert files == {}
+
+
 def test_multipart_roundtrip():
     boundary = "----bound"
     body = (
