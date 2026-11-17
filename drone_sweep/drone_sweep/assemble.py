@@ -18,6 +18,7 @@ from .logs import load_bin, load_tlog
 from .mission_files import parse_gpx, parse_plan, parse_qgc_waypoints
 from .model import Card, confirmed, document, missing, not_applicable
 from .ports import ardupilot_ports, decode_osd_position, parse_betaflight_serial
+from .elrs_assemble import try_binding_phrase_crack
 from .radio import parse_radio_image, parse_radio_json
 from .stm32 import parse_stm32_log
 from .route import (
@@ -47,6 +48,8 @@ class Inputs:
     stm32_text: str | None = None
     banner: str = ""
     auth_declined: bool = False
+    binding_wordlist: Path | None = None
+    binding_memory_table: Path | None = None
     mavlink_rows: list[dict] | None = None
     read_note: str = ""
     msp_identity: dict | None = None
@@ -76,6 +79,11 @@ def assemble(inputs: Inputs) -> Card:
 
     _vehicle_fields(card, dump, rows)
     _radio_fields(card, inputs)
+    try_binding_phrase_crack(
+        card,
+        binding_wordlist=inputs.binding_wordlist,
+        binding_memory_table=inputs.binding_memory_table,
+    )
     _nameplates(card, inputs.nameplates)
     _stm32(card, inputs.stm32_text)
     if inputs.mavlink_rows:

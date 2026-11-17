@@ -32,6 +32,16 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--nameplate", action="append", default=[], help="ключ=текст шильдика, например vtx=Skyzone")
     build.add_argument("--banner", default="")
     build.add_argument("--auth-declined", action="store_true")
+    build.add_argument(
+        "--binding-wordlist",
+        type=Path,
+        help="словарь binding phrase ExpressLRS; при наличии radio_uid только статус, без сохранения фразы",
+    )
+    build.add_argument(
+        "--binding-memory-table",
+        type=Path,
+        help="JSON radужной таблицы в RAM (strela elrs build-memory --out)",
+    )
     build.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "explain":
@@ -65,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
             stm32_text=args.stm32.read_text(encoding="utf-8", errors="replace") if args.stm32 else None,
             banner=args.banner,
             auth_declined=args.auth_declined,
+            binding_wordlist=args.binding_wordlist,
+            binding_memory_table=args.binding_memory_table,
         )
     )
     args.out.mkdir(parents=True, exist_ok=True)

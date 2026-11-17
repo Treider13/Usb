@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 import os
 import signal
+from pathlib import Path
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Iterator, Protocol, Sequence
 
 from .elrs_binding import (
@@ -37,6 +37,29 @@ class MemoryRainbowStore:
     def set_many(self, rows: Sequence[tuple[str, str]]) -> None:
         for key, phrase in rows:
             self.table[key.upper()] = phrase
+
+
+def build_memory_table(wordlist: Path, *, encoding: str = "utf-8") -> MemoryRainbowStore:
+    table: dict[str, str] = {}
+    for phrase, _ in iter_wordlist_lines(wordlist, encoding=encoding):
+        table[binding_phrase_uid_hex(phrase)] = phrase
+    return MemoryRainbowStore(table)
+
+
+def load_memory_table(path: Path) -> MemoryRainbowStore:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("файл таблицы должен быть JSON-объектом")
+    normalized = {str(key).upper(): str(value) for key, value in payload.items()}
+    return MemoryRainbowStore(normalized)
+
+
+def save_memory_table(store: MemoryRainbowStore, path: Path) -> None:
+    path.write_text(json.dumps(store.table, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def crack_binding_phrase_from_store(uid_bytes: Sequence[int], store: RainbowStore) -> str | None:
+    return lookup_binding_phrase(uid_bytes, store)
 
 
 def make_redis_store(

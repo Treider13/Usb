@@ -27,6 +27,8 @@ QUESTIONS = (
     ("plan", "Файл .plan"),
     ("radio_json", "Сохранённый JSON страницы приёмника"),
     ("radio_image", "Образ flash приёмника"),
+    ("binding_wordlist", "Словарь binding phrase (Enter — не подбирать)"),
+    ("binding_memory_table", "JSON RAM-таблицы (Enter — пропустить)"),
     ("nameplate_vtx", "Шильдик видеопередатчика"),
     ("nameplate_radio", "Шильдик радиомодуля"),
     ("nameplate_gimbal", "Шильдик подвеса"),
@@ -68,6 +70,8 @@ def inputs_from_answers(answers: dict[str, str]) -> Inputs:
         nameplates=plates,
         stm32_text=text_of(path_of("stm32")),
         auth_declined=answers.get("auth_declined", "").strip() in {"1", "yes", "да"},
+        binding_wordlist=path_of("binding_wordlist"),
+        binding_memory_table=path_of("binding_memory_table"),
     )
 
 
@@ -254,7 +258,7 @@ def _dispatch(args: list[str]) -> int:
     print(explain_text())
     print(
         "Команды: strela, strela explain, strela serve --port 8765, strela assemble ..., "
-        "strela elrs uid|crack|lookup|build-rainbow|build-memory ..."
+        "strela elrs uid|dump|crack|lookup|lookup-memory|build-rainbow|build-memory ..."
     )
     return 1
 
