@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .ardupilot_vtx import describe as describe_ardupilot_vtx
+from .banner import frame_from_params, mav_type_word, parse_banner_lines
 from .blackbox import parse_gps_csv, parse_header_file
 from .dump import master_or_unique, parse_boxnames, parse_dump
 from .vtx import inav_grid, inav_saved_frequency, parse_video_grid, parse_vtx_rules, selected_channel
@@ -289,6 +290,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
             card.put("log_events", confirmed(events, "bin EV"))
         _known_params(card, params)
         _ardupilot_ports(card, params)
+        _learn_banner(card, [str(item.get("text") or "") for item in messages], "bin MSG")
         _baro(card, rows)
         _messages_with_rcin(card, rows, messages)
         _rcin_interval(card, rows)
@@ -489,6 +491,64 @@ def _serialrx_class(card: Card, provider: str) -> None:
         )
 
 
+def _whole(value) -> int | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != int(number):
+        return None
+    return int(number)
+
+
+def _banner_may_set(card: Card, name: str, source: str) -> bool:
+    current = card.fields.get(name)
+    if current is None or current.status != "confirmed":
+        return True
+    if "MSP" in current.source or "AUTOPILOT_VERSION" in current.source:
+        return False
+    return source.endswith("STATUSTEXT") and "STATUSTEXT" not in current.source
+
+
+def _learn_banner(card: Card, lines: list[str], source: str) -> None:
+    found = parse_banner_lines(lines)
+    if found["firmware"]:
+        card.put("firmware", confirmed(found["firmware"], source, "строка прошивки, которую плата прислала сама"))
+        card.raw_banner = found["firmware"]
+    if found["board_name"] and (card.fields.get("board_name") is None or _banner_may_set(card, "board_name", source)):
+        card.put(
+            "board_name",
+            confirmed(found["board_name"], source, "имя полётника из строки баннера, следом номер микросхемы"),
+        )
+    if found["mcu_id"] and _banner_may_set(card, "mcu_id", source):
+        card.put(
+            "mcu_id",
+            confirmed(found["mcu_id"], source, "номер микросхемы из той же строки, что имя полётника"),
+        )
+    if found["frame"]:
+        current = card.fields.get("frame")
+        if (
+            current is not None
+            and current.status == "confirmed"
+            and current.value != found["frame"]
+            and "FRAME" in current.source
+        ):
+            card.holes.append(
+                f"Тип рамы в параметрах ({current.value}) и в строке Frame: {found['frame_raw']} различаются. В карточке строка платы."
+            )
+        card.put("frame", confirmed(found["frame"], source, f"строка платы Frame: {found['frame_raw']}"))
+    if found["os"]:
+        card.put("flight_os", confirmed(found["os"], source, "строка системы из баннера"))
+    if found["outputs"]:
+        card.put("motor_outputs", confirmed(found["outputs"], source, "строка RCOut из баннера"))
+    if found["imu"]:
+        card.put("imu", confirmed(found["imu"], source, "строка IMU из баннера"))
+    if found["iomcu"]:
+        card.put("iomcu", confirmed(found["iomcu"], source, "строка IOMCU из баннера"))
+    if found["rest"]:
+        card.put("board_messages", confirmed(found["rest"], source, "остальные строки платы"))
+
+
 def _known_params(card: Card, params: dict, source: str = "bin PARM") -> None:
     if "RC_PROTOCOLS" in params:
         value = int(params["RC_PROTOCOLS"])
@@ -550,6 +610,17 @@ def _known_params(card: Card, params: dict, source: str = "bin PARM") -> None:
     for name in ("FS_THR_ENABLE", "FS_GCS_ENABLE", "FS_EKF_ACTION", "BATT_FS_CRT_ACT", "FS_CRASH_CHECK"):
         if name in params:
             card.put(name.lower(), confirmed(params[name], source))
+    if "frame" not in card.fields and "FRAME_CLASS" in params:
+        klass = _whole(params.get("FRAME_CLASS"))
+        kind = _whole(params["FRAME_TYPE"]) if "FRAME_TYPE" in params else None
+        if klass is not None:
+            named = frame_from_params(klass, kind)
+            if named is not None:
+                words, raw = named
+                card.put(
+                    "frame",
+                    confirmed(words, f"{source} FRAME_CLASS", f"в параметрах {raw}. Строки Frame в баннере не было."),
+                )
 
 
 def _baro(card: Card, rows: list[dict]) -> None:
@@ -753,13 +824,14 @@ def _absorb_mavlink(card: Card, rows: list[dict], source: str = "tlog") -> None:
             card.raw_banner = banner
     texts = [str(row.get("text") or "") for row in rows if row.get("name") == "STATUSTEXT" and row.get("text")]
     if texts:
-        card.put(
-            "board_messages",
-            confirmed(texts, f"{source} STATUSTEXT", "строки, которые плата сама прислала при чтении"),
-        )
-        named = next((text for text in texts if text.lower().startswith("ardu")), "")
-        if named:
-            card.raw_banner = named
+        _learn_banner(card, texts, f"{source} STATUSTEXT")
+    if "frame" not in card.fields and beats:
+        word = mav_type_word(int(beats[0].get("type") or -1))
+        if word:
+            card.put(
+                "frame",
+                confirmed(word, f"{source} HEARTBEAT", "MAV_TYPE из HEARTBEAT. Строки Frame плата не прислала."),
+            )
     logs = [row for row in rows if row.get("name") == "LOG_ENTRY"]
     if logs:
         card.put(
@@ -1065,9 +1137,4 @@ def _holes(card: Card) -> None:
             card.hints.append(hint_for_hole(text))
     source = card.fields.get("route_source")
     if source is not None and source.value == "none":
-        card.holes.append(
-            "GPS-сообщений со статусом 3D в .BIN нет. .tlog не дал точек. "
-            "Кадров GPS Blackbox нет. GPX треком полёта не считается. "
-            "Маршрут и точка взлёта — missing, источник none. "
-            "Высота барометра и курс отрыва треком не являются."
-        )
+        card.holes.append("Маршрута нет, источник none. GPS 3D в журнале нет, .tlog пуст, Blackbox GPS нет.")

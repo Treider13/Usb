@@ -569,3 +569,68 @@ class _Status:
     def get_type(self):
         return "STATUSTEXT"
 
+
+def test_banner_lines_split_firmware_board_and_frame():
+    lines = [
+        "ArduCopter V4.7.0-beta7 (97775f82)",
+        "ChibiOS: 4f34e217",
+        "speedybeef4v5 00590031 32345119 32313431",
+        "RCOut: DS300:1-4 PWM:5-6 NeoP:7",
+        "IMU0: normal sampling 1.0kHz/1.0kHz",
+        "Frame: QUAD/X",
+    ]
+    card = assemble(Inputs(mavlink_rows=[{"name": "STATUSTEXT", "text": line} for line in lines]))
+    assert card.fields["firmware"].value == "ArduCopter V4.7.0-beta7 (97775f82)"
+    assert card.fields["board_name"].value == "speedybeef4v5"
+    assert card.fields["mcu_id"].value == "00590031 32345119 32313431"
+    assert card.fields["frame"].value == "квадрокоптер, схема X"
+    assert card.fields["flight_os"].value == "ChibiOS: 4f34e217"
+    assert card.fields["motor_outputs"].value == "DS300:1-4 PWM:5-6 NeoP:7"
+    assert card.fields["imu"].value == ["IMU0: обычная выборка 1.0kHz/1.0kHz"]
+    assert "board_messages" not in card.fields
+    page = __import__("drone_sweep.report", fromlist=["render_html"]).render_html(card)
+    assert "Прошивка" in page
+    assert "Полётник" in page
+    assert "Тип рамы" in page
+    assert "[" not in card.fields["firmware"].value
+    assert "квадрокоптер, схема X" in page
+
+
+def test_frame_comes_from_parameters_when_the_banner_has_no_frame_line():
+    card = assemble(
+        Inputs(
+            mavlink_rows=[
+                {"name": "HEARTBEAT", "autopilot": 3, "type": 2},
+                {"name": "PARAM_VALUE", "param_id": "FRAME_CLASS", "param_value": 1.0},
+                {"name": "PARAM_VALUE", "param_id": "FRAME_TYPE", "param_value": 1.0},
+            ]
+        )
+    )
+    assert card.fields["frame"].value == "квадрокоптер, схема X"
+    assert "FRAME_CLASS" in card.fields["frame"].source
+
+
+def test_unknown_frame_token_stays_as_the_board_wrote_it():
+    card = assemble(Inputs(mavlink_rows=[{"name": "STATUSTEXT", "text": "Frame: WIDGET/NOPE"}]))
+    assert card.fields["frame"].value == "WIDGET/NOPE"
+
+
+def test_a_bad_mavlink_prefix_does_not_abort_the_read():
+    class Raw:
+        def __init__(self):
+            self.chunks = [bytes([0x49, 0x6E, 0x69, 0x74])]
+
+        def read(self, size: int) -> bytes:
+            if not self.chunks:
+                return b""
+            return self.chunks.pop(0)
+
+        def write(self, data: bytes) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    link = SerialMavlink(Raw(), {"src_system": 1, "src_component": 1})
+    assert link.recv_match(type="PARAM_VALUE", blocking=True, timeout=0.05) is None
+
