@@ -38,3 +38,17 @@ def test_menu_pages_use_the_same_sheet():
     assert "dump all" in form
     assert "парол" in explain.lower()
     assert "Файл отчёта" not in home
+    assert "Пять видов карточки" in home
+
+
+def test_five_looks_explain_the_screen_and_the_log_in_plain_russian():
+    from drone_sweep.designs import design_page
+
+    first = design_page(1).decode("utf-8")
+    assert "Ночная лампа" in first
+    assert "Экран в очках" in first
+    assert "Точка взлёта" in first
+    assert "не скорость радио" in first
+    assert "prefers-reduced-motion" in first
+    names = [design_page(number).decode("utf-8") for number in range(1, 6)]
+    assert len({page.split("<title>", 1)[1].split("</title>", 1)[0] for page in names}) == 5
