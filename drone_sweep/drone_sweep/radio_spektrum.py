@@ -104,33 +104,114 @@ def apply_ardupilot_dsm(
     _put_orange_profile(card, proto, int(card.fields["spektrum_channel_count"].value) if card.fields.get("spektrum_channel_count") else 12)
 
 
-def put_ardupilot_radio_summary(card: Card) -> None:
-    """Собирает радио-блок ArduPilot в один словарь (как dump у BF)."""
-    summary: dict[str, object] = {}
-    for key in (
-        "rc_protocols",
-        "uart_protocol",
-        "mavlink_radio_status",
-        "mavlink_rc_interval_ms",
-        "receiver_port",
-        "serial_ports",
-        "radio_protocol",
-        "serial_link_class",
-        "spektrum_channel_count",
-        "spektrum_baud",
-    ):
+RADIO_READ_KEYS = (
+    "radio_protocol",
+    "serialrx_provider",
+    "serial_link_class",
+    "uart_protocol",
+    "receiver_port",
+    "serial_ports",
+    "uplink_lq",
+    "spektrum_channel_count",
+    "spektrum_baud",
+    "spektrum_sat_bind",
+    "expresslrs_spi",
+    "rc_protocols",
+    "mavlink_radio_status",
+    "mavlink_rc_interval_ms",
+)
+
+
+def _radio_link_kind(card: Card) -> str | None:
+    elrs = card.fields.get("expresslrs_spi")
+    if elrs is not None and elrs.status == "confirmed":
+        return "expresslrs_spi"
+    features = card.fields.get("features")
+    if features is not None and features.status == "confirmed" and isinstance(features.value, dict):
+        enabled = features.value.get("enabled") or []
+        if any("RX_SPI" in str(item) for item in enabled):
+            return "rx_spi"
+    provider = card.fields.get("serialrx_provider")
+    if provider is not None and provider.status == "confirmed":
+        return "uart_serialrx"
+    if card.family in {"ardupilot", "mavlink"}:
+        return "ardupilot_uart"
+    return None
+
+
+def _radio_summary_source(card: Card) -> str:
+    if card.family == "ardupilot":
+        return "MAVLink / .BIN"
+    if card.family in {"betaflight", "inav"}:
+        return "dump all"
+    return "MAVLink"
+
+
+def put_radio_read_summary(card: Card) -> None:
+    """Один блок «Радио» для Betaflight, INAV и ArduPilot — те же ключи, что в карточке."""
+    summary: dict[str, object] = {"flight_os": card.family}
+    for key in RADIO_READ_KEYS:
         field = card.fields.get(key)
         if field is not None and field.status == "confirmed":
             summary[key] = field.value
-    if not summary:
+    link = _radio_link_kind(card)
+    if link:
+        summary["radio_link_kind"] = link
+    orange = card.fields.get("orange_rx_profile")
+    if orange is not None and orange.status == "confirmed":
+        summary["orange_rx_profile"] = orange.value
+    rc = summary.get("rc_protocols")
+    if isinstance(rc, dict) and rc.get("bits") == ["All"] and "orange_rx_profile" not in summary:
+        summary["rc_protocols_note"] = (
+            "RC_PROTOCOLS=All — маска «всё разрешено»; линия DSM/Spektrum фиксируется по MSG "
+            "«Rc protocol:» или uart_protocol, а не по биту DSM в маске"
+        )
+    if len(summary) <= 1:
         return
+    source = _radio_summary_source(card)
+    detail = "радио и приёмник: dump или MAVLink/.BIN, порты, телеметрия, OrangeRX если есть"
+    card.put("radio_read_summary", confirmed(summary, source, detail))
+    if card.family in {"ardupilot", "mavlink"}:
+        card.put("ardupilot_radio_summary", confirmed(summary, source, detail))
+
+
+def put_ardupilot_radio_summary(card: Card) -> None:
+    """Совместимость: то же, что put_radio_read_summary."""
+    put_radio_read_summary(card)
+
+
+def _enrich_orange_profile(card: Card, profile: dict[str, object]) -> None:
+    for key in ("receiver_port", "serial_ports", "serialrx_provider", "radio_protocol"):
+        field = card.fields.get(key)
+        if field is not None and field.status == "confirmed":
+            profile[key] = field.value
+    features = card.fields.get("features")
+    if features is not None and features.status == "confirmed" and isinstance(features.value, dict):
+        enabled = features.value.get("enabled") or []
+        spi = [item for item in enabled if "RX_SPI" in str(item)]
+        if spi:
+            profile["features_rx_spi"] = spi
+    if card.fields.get("expresslrs_spi") is not None and card.fields["expresslrs_spi"].status == "confirmed":
+        profile["expresslrs_on_fc"] = True
+    profile["read_scope"] = (
+        "с полётника: serial/SPI dump, bind, порты; прошивку спутника OrangeRX по отдельному USB не читаем"
+    )
+
+
+def refresh_orange_rx_profile(card: Card) -> None:
+    """Дополняет orange_rx_profile после nameplate и поздних полей."""
+    field = card.fields.get("orange_rx_profile")
+    if field is None or field.status != "confirmed" or not isinstance(field.value, dict):
+        return
+    profile = dict(field.value)
+    nameplate = card.fields.get("nameplate_radio")
+    if nameplate is not None and nameplate.status == "document":
+        profile["nameplate"] = nameplate.value
+        profile["vendor_hint"] = "OrangeRX / Spektrum satellite"
+    _enrich_orange_profile(card, profile)
     card.put(
-        "ardupilot_radio_summary",
-        confirmed(
-            summary,
-            "MAVLink / .BIN",
-            "радио и приёмник: параметры, RADIO_STATUS, порты",
-        ),
+        "orange_rx_profile",
+        confirmed(profile, field.source, field.reason or ""),
     )
 
 
@@ -148,6 +229,7 @@ def _put_orange_profile(card: Card, protocol: str, channels: int) -> None:
     bind = card.fields.get("spektrum_sat_bind")
     if bind is not None and bind.status == "confirmed":
         profile["bind_setting"] = bind.value
+    _enrich_orange_profile(card, profile)
     card.put(
         "orange_rx_profile",
         confirmed(

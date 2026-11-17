@@ -205,7 +205,8 @@ USE = {
     "spektrum_baud": "Скорость линии Spektrum.",
     "spektrum_sat_bind": "Импульсы привязки записаны. Команда привязки не отправляется.",
     "orange_rx_profile": "OrangeRX / DSM: то, что сняли с полётника.",
-    "ardupilot_radio_summary": "Радио ArduPilot одним блоком: маска RC, порты, телеметрия.",
+    "radio_read_summary": "Радио одним блоком: те же поля, что выше — для BF, INAV и ArduPilot.",
+    "ardupilot_radio_summary": "Радио ArduPilot (дубликат radio_read_summary для старых карточек).",
     "rc_protocols": "Какие протоколы пульта разрешены в параметрах ArduPilot.",
 }
 
@@ -241,6 +242,7 @@ GROUPS = (
         "spektrum_baud",
         "spektrum_sat_bind",
         "orange_rx_profile",
+        "radio_read_summary",
         "rc_protocols",
         "ardupilot_radio_summary",
     )),
@@ -277,7 +279,7 @@ def _group_of(name: str) -> str:
             return title
     if name.startswith("nameplate_"):
         return "Кто это"
-    if name in {"orange_rx_profile", "ardupilot_radio_summary", "rc_protocols"}:
+    if name in {"orange_rx_profile", "radio_read_summary", "ardupilot_radio_summary", "rc_protocols"}:
         return "Радио"
     if name.startswith("radio_"):
         return "Радио"

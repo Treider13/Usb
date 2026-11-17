@@ -24,7 +24,8 @@ from .radio_spektrum import (
     apply_ardupilot_dsm,
     apply_spektrum_serial_provider,
     apply_spektrum_spi,
-    put_ardupilot_radio_summary,
+    put_radio_read_summary,
+    refresh_orange_rx_profile,
 )
 from .radio import parse_radio_image, parse_radio_json
 from .stm32 import parse_stm32_log
@@ -104,6 +105,10 @@ def assemble(inputs: Inputs) -> Card:
         binding_memory_table=inputs.binding_memory_table,
     )
     _nameplates(card, inputs.nameplates)
+    if inputs.nameplates:
+        refresh_orange_rx_profile(card)
+        if "radio_read_summary" in card.fields:
+            put_radio_read_summary(card)
     _stm32(card, inputs.stm32_text)
     if inputs.mavlink_rows:
         _absorb_mavlink(card, inputs.mavlink_rows, source="usb")
@@ -289,6 +294,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
             "vtx_device_responded",
             missing("опроса видеопередатчика не было. Строки vtx — это сохранённая таблица, не ответ устройства.", "dump all"),
         )
+        put_radio_read_summary(card)
     if card.family == "ardupilot":
         params = {}
         messages = []
@@ -345,7 +351,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         uart = card.fields.get("uart_protocol")
         uart_text = str(uart.value) if uart is not None and uart.status == "confirmed" else None
         apply_ardupilot_dsm(card, rc_protocol_bits=rc_bits, uart_protocol=uart_text, source="bin / MAVLink")
-        put_ardupilot_radio_summary(card)
+        put_radio_read_summary(card)
 
 
 # printConfig emits these on every `diff all`, whether or not a setting changed.
@@ -957,6 +963,19 @@ def _absorb_mavlink(card: Card, rows: list[dict], source: str = "tlog") -> None:
     texts = [str(row.get("text") or "") for row in rows if row.get("name") == "STATUSTEXT" and row.get("text")]
     if texts:
         _learn_banner(card, texts, f"{source} STATUSTEXT")
+        for text in texts:
+            if text.lower().startswith("rc protocol:"):
+                heard = text.split(":", 1)[1].strip()
+                if heard:
+                    card.put(
+                        "uart_protocol",
+                        confirmed(
+                            heard,
+                            f"{source} STATUSTEXT",
+                            "плата написала, какой протокол пульта она приняла",
+                        ),
+                    )
+                break
     if "frame" not in card.fields and beats:
         word = mav_type_word(int(beats[0].get("type") or -1))
         if word:
@@ -1009,7 +1028,7 @@ def _absorb_mavlink(card: Card, rows: list[dict], source: str = "tlog") -> None:
         uart = card.fields.get("uart_protocol")
         uart_text = str(uart.value) if uart is not None and uart.status == "confirmed" else None
         apply_ardupilot_dsm(card, rc_protocol_bits=rc_bits, uart_protocol=uart_text, source=source)
-        put_ardupilot_radio_summary(card)
+        put_radio_read_summary(card)
 
 
 def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
