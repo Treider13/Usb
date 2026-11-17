@@ -12,6 +12,7 @@ from .hints import WORKFLOW
 from .menu import APP_NAME, _log_id, inputs_from_answers, write_report
 from .report import render_html
 from .theme import page
+from .top2026 import render_top_inner
 
 
 FORM_FIELDS = (
@@ -76,7 +77,7 @@ def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
 <article class="panel"><h2>Чтение</h2><p>Слева порт и папка. Справа — плата, дамп, параметры и журнал .BIN.</p></article>
 <article class="panel"><h2>Карточка</h2><p>Зелёным — то, что плата ответила. Чего не хватает — коротким списком.</p></article>
 </div>
-<p><a class="action" href="/read">Открыть чтение</a> <a class="action quiet" href="/assemble">Собрать карточку из файлов</a> <a class="action quiet" href="/crack">Подбор (ELRS/MILELRS)</a></p>
+<p><a class="action" href="/read">Открыть чтение</a> <a class="action quiet" href="/assemble">Собрать карточку из файлов</a> <a class="action quiet" href="/crack">Подбор (ELRS/MILELRS)</a> <a class="action quiet" href="/top2026">ТОП 2026</a></p>
 """
     return page(APP_NAME, inner, connect=connect_bar(ports), current="/").encode("utf-8")
 
@@ -227,6 +228,13 @@ UID из binding phrase, JSON из flash, подбор фразы. Работа�
     return page(f"{APP_NAME} — подбор", inner, connect=connect_bar(), current="/crack").encode("utf-8")
 
 
+def top_page(ports: list[tuple[str, str]] | None = None) -> bytes:
+    inner = render_top_inner()
+    return page(f"{APP_NAME} — ТОП 2026", inner, connect=connect_bar(ports), current="/top2026").encode(
+        "utf-8"
+    )
+
+
 def explain_page() -> bytes:
     steps = "".join(f"<li>{html.escape(step)}</li>" for step in WORKFLOW)
     inner = f"""
@@ -249,6 +257,8 @@ class StrelaHandler(BaseHTTPRequestHandler):
             self._send(200, form_page())
         elif self.path.startswith("/crack"):
             self._send(200, crack_page())
+        elif self.path.startswith("/top2026"):
+            self._send(200, top_page())
         elif self.path.startswith("/explain"):
             self._send(200, explain_page())
         else:
