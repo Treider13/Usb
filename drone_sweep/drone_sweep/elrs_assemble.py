@@ -103,10 +103,12 @@ def search_binding_sources(
         else:
             try:
                 store = load_memory_table(binding_memory_table)
+                phrase = crack_binding_phrase_from_store(uid, store)
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 problems.append(f"таблица не читается: {exc}")
+            except Exception as exc:
+                problems.append(f"таблица не читается: {exc}")
             else:
-                phrase = crack_binding_phrase_from_store(uid, store)
                 if phrase:
                     return phrase, binding_memory_table.name, ""
                 problems.append(f"в {binding_memory_table.name} нет фразы для UID")
@@ -114,7 +116,11 @@ def search_binding_sources(
         if not binding_wordlist.is_file():
             problems.append(f"словарь не найден: {binding_wordlist}")
         else:
-            phrase = crack_binding_phrase(uid, binding_wordlist)
+            try:
+                phrase = crack_binding_phrase(uid, binding_wordlist)
+            except (OSError, ValueError) as exc:
+                problems.append(f"словарь не читается: {exc}")
+                return None, binding_wordlist.name, "; ".join(problems)
             if phrase:
                 return phrase, binding_wordlist.name, ""
             problems.append(f"в {binding_wordlist.name} нет фразы для UID")

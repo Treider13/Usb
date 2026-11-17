@@ -388,6 +388,14 @@ def explain_page() -> bytes:
 
 
 class StrelaHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except Exception as exc:
+            self._fail(exc)
+
     def do_GET(self) -> None:
         try:
             self._get()
@@ -516,8 +524,12 @@ def serve(port: int = 8765) -> None:
     try:
         server = ThreadingHTTPServer(("127.0.0.1", port), StrelaHandler)
     except OSError as exc:
-        raise ServeError(f"Адрес 127.0.0.1:{port} занят ({exc}).") from exc
+        raise ServeError(
+            f"Адрес 127.0.0.1:{port} занят ({exc}). Старый процесс ещё слушает порт. "
+            f"Остановите его: fuser -k {port}/tcp"
+        ) from exc
     print(f"{APP_NAME}: http://127.0.0.1:{port}", flush=True)
+    print("Сборка: формы без cgi. Ошибка запроса пишется на страницу и в этот терминал.", flush=True)
     print("Остановка: Ctrl+C", flush=True)
     try:
         server.serve_forever()
