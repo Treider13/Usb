@@ -26,6 +26,8 @@ FORM_FIELDS = (
     ("plan", "Файл .plan", "Миссия QGroundControl. Точкой взлёта не становится."),
     ("radio_json", "Страница приёмника", "JSON, который вы сохранили с http://10.0.0.1. Пароль в файл не кладите."),
     ("radio_image", "Образ приёмника", "Файл образа приёмника."),
+    ("binding_wordlist", "Словарь binding phrase", "ExpressLRS/MILELRS: подбор по UID. Пусто — не подбирать."),
+    ("binding_memory_table", "JSON RAM-таблицы", "Файл от strela elrs build-memory --out. Альтернатива словарю."),
     ("stm32", "Журнал STM32", "Сохранённый вывод STM32_Programmer_CLI --connect port=SWD или st-info --probe. Стирание и запись не подходят."),
     ("nameplate_vtx", "Шильдик видеопередатчика", "Текст с корпуса. Это документ, не измеренный канал."),
     ("nameplate_radio", "Шильдик радиомодуля", "Текст с корпуса. Протокол по нему не называется."),
@@ -71,7 +73,7 @@ def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
 <article class="panel"><h2>Чтение</h2><p>Слева порт и папка. Справа — плата, дамп, параметры и журнал .BIN.</p></article>
 <article class="panel"><h2>Карточка</h2><p>Зелёным — то, что плата ответила. Чего не хватает — коротким списком.</p></article>
 </div>
-<p><a class="action" href="/read">Открыть чтение</a> <a class="action quiet" href="/assemble">Собрать карточку из файлов</a></p>
+<p><a class="action" href="/read">Открыть чтение</a> <a class="action quiet" href="/assemble">Собрать карточку из файлов</a> <a class="action quiet" href="/crack">Подбор (ELRS/MILELRS)</a></p>
 """
     return page(APP_NAME, inner, connect=connect_bar(ports), current="/").encode("utf-8")
 
@@ -157,13 +159,78 @@ def form_page() -> bytes:
     return page(f"{APP_NAME} — файлы", inner, connect=connect_bar(), current="/assemble").encode("utf-8")
 
 
+def crack_page(result: str = "") -> bytes:
+    result_block = f'<section class="report">{result}</section>' if result else ""
+    inner = f"""
+<h1>Подбор</h1>
+<p class="lede">Как <a href="https://github.com/CIRCL/Drone-Forensic/tree/main/elrs">CIRCL Drone-Forensic elrs/</a>:
+UID из binding phrase, JSON из flash, подбор фразы. Работает для <strong>ExpressLRS</strong> и <strong>MILELRS</strong>.
+<strong>OrangeRX</strong> — протокол DSM, сюда не подходит.</p>
+{result_block}
+<div class="cards">
+<article class="panel">
+<h2>UID из фразы</h2>
+<form method="post" action="/crack">
+<input type="hidden" name="action" value="uid">
+<label>Binding phrase <input name="phrase" placeholder="например test"></label>
+<p><button type="submit">Посчитать UID</button></p>
+</form>
+</article>
+<article class="panel">
+<h2>Разбор flash / HEX</h2>
+<form method="post" action="/crack">
+<input type="hidden" name="action" value="dump">
+<label>Путь к .bin или Intel HEX <input name="flash_path"></label>
+<p><button type="submit">Извлечь uid и Wi‑Fi (без пароля)</button></p>
+</form>
+</article>
+<article class="panel">
+<h2>Подбор фразы по UID</h2>
+<form method="post" action="/crack">
+<input type="hidden" name="action" value="crack">
+<label>UID (6 байт, через запятую) <input name="uid" placeholder="79,4,253,130,33,85"></label>
+<label>Словарь <input name="binding_wordlist"></label>
+<label>или JSON таблица <input name="memory_table"></label>
+<p><button type="submit">Подобрать</button></p>
+</form>
+</article>
+<article class="panel">
+<h2>Собрать RAM-таблицу</h2>
+<form method="post" action="/crack">
+<input type="hidden" name="action" value="build_memory">
+<label>Словарь <input name="memory_wordlist"></label>
+<label>Сохранить JSON <input name="memory_out"></label>
+<p><button type="submit">Построить таблицу</button></p>
+</form>
+</article>
+</div>
+<article class="panel cell wide">
+<h2>Карточка с подбором</h2>
+<form method="post" action="/crack">
+<input type="hidden" name="action" value="assemble">
+<div class="grid">
+<label>JSON приёмника <input name="radio_json_path"></label>
+<label>Образ flash <input name="radio_image_path"></label>
+<label>Словарь <input name="assemble_wordlist"></label>
+<label>JSON таблица <input name="assemble_memory"></label>
+<label>Папка отчёта <input name="out" value="strela-out"></label>
+</div>
+<p><button type="submit">Собрать карточку</button></p>
+</form>
+<p class="help">В card.json будет статус <code>radio_binding_phrase_crack</code>, текст фразы не сохраняется.</p>
+</article>
+"""
+    return page(f"{APP_NAME} — подбор", inner, connect=connect_bar(), current="/crack").encode("utf-8")
+
+
 def explain_page() -> bytes:
     steps = "".join(f"<li>{html.escape(step)}</li>" for step in WORKFLOW)
     inner = f"""
 <h1>Подсказки</h1>
 <p class="lede">Идите по шагам. Если клетка красная, прочитайте причину и сделайте только то, что написано рядом.</p>
 <ol class="steps">{steps}</ol>
-<p>Если страница приёмника просит пароль, введите его сами один раз. Программа пароли не перебирает.</p>
+<p>Если страница приёмника просит пароль Wi‑Fi, введите его сами один раз — это не вкладка «Подбор».</p>
+<p>Binding phrase ExpressLRS/MILELRS — вкладка <a href="/crack">Подбор</a> (как CIRCL elrs).</p>
 """
     return page("Подсказки", inner, connect=connect_bar(), current="/explain").encode("utf-8")
 
@@ -176,6 +243,8 @@ class StrelaHandler(BaseHTTPRequestHandler):
             self._send(200, read_page())
         elif self.path.startswith("/assemble"):
             self._send(200, form_page())
+        elif self.path.startswith("/crack"):
+            self._send(200, crack_page())
         elif self.path.startswith("/explain"):
             self._send(200, explain_page())
         else:
@@ -187,6 +256,13 @@ class StrelaHandler(BaseHTTPRequestHandler):
         form = {key: values[0] for key, values in parse_qs(raw).items()}
         if self.path.startswith("/usb"):
             self._read_usb(form)
+            return
+        if self.path.startswith("/crack"):
+            from .elrs_ui import handle_elrs_form
+
+            _ok, fragment = handle_elrs_form(form)
+            body = crack_page(fragment)
+            self._send(200, body)
             return
         if not self.path.startswith("/assemble"):
             self._send(404, b"not found")

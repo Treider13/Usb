@@ -2,7 +2,7 @@
 
 from drone_sweep.assemble import Inputs, assemble
 from drone_sweep.report import render_html
-from drone_sweep.webapp import explain_page, form_page, home_page
+from drone_sweep.webapp import crack_page, explain_page, form_page, home_page
 from tests.test_ports import DUMP
 
 
@@ -30,7 +30,8 @@ def test_menu_pages_use_the_same_sheet():
     home = home_page().decode("utf-8")
     form = form_page().decode("utf-8")
     explain = explain_page().decode("utf-8")
-    for body in (home, form, explain):
+    crack = crack_page().decode("utf-8")
+    for body in (home, form, crack, explain):
         assert 'class="sheet"' in body
         assert "Liberation Sans" in body
     assert "Собрать карточку" in home
@@ -39,6 +40,8 @@ def test_menu_pages_use_the_same_sheet():
     assert "Собрать карточку" in form
     assert "dump all" in form
     assert "парол" in explain.lower()
+    assert "/crack" in explain
+    assert "binding_wordlist" in form
     assert "Файл отчёта" not in home
     assert "Пять видов" not in home
     assert "/design" not in home
