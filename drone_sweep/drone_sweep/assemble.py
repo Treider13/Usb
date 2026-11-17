@@ -964,7 +964,11 @@ def _absorb_mavlink(card: Card, rows: list[dict], source: str = "tlog") -> None:
     if logs:
         card.put(
             "dataflash_logs",
-            confirmed(logs, f"{source} LOG_ENTRY", "файлы журнала в памяти платы. Карточка открывает последний ненулевой."),
+            confirmed(
+                logs,
+                f"{source} LOG_ENTRY",
+                "список журналов на полётнике; в карточку попадает самый новый с данными.",
+            ),
         )
     radios = [row for row in rows if row.get("name") == "RADIO_STATUS"]
     if radios:

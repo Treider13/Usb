@@ -465,7 +465,7 @@ def test_ardupilot_version_banner_and_log_list_reach_the_card():
     page = __import__("drone_sweep.report", fromlist=["render_html"]).render_html(card)
     assert "Версия прошивки" in page
     assert "Журналы на плате" in page
-    assert "Эта карточка открыла последний ненулевой: номер 3" in page
+    assert "В эту карточку взят журнал № 3" in page
     assert "Что делать" in page
 
 
