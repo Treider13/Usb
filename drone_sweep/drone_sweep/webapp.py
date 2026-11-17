@@ -411,6 +411,9 @@ class StrelaHandler(BaseHTTPRequestHandler):
     def _fail(self, exc: Exception) -> None:
         import traceback
 
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+            print("Браузер закрыл страницу до конца ответа.", flush=True)
+            return
         traceback.print_exc()
         text = html.escape(f"{type(exc).__name__}: {exc}")
         body = page(
@@ -424,6 +427,8 @@ class StrelaHandler(BaseHTTPRequestHandler):
         ).encode("utf-8")
         try:
             self._send(500, body)
+        except (BrokenPipeError, ConnectionResetError):
+            print("Браузер закрыл страницу до конца ответа.", flush=True)
         except Exception:
             traceback.print_exc()
 

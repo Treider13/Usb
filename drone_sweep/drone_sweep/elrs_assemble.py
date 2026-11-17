@@ -90,13 +90,19 @@ def _refusal(protocol: str | None) -> str:
     return "протокол приёмника не подтверждён. Подбор UID не запускался."
 
 
+# rockyou.txt is about 140 MB. Scanning it inside one browser request makes the
+# client close the socket before the first byte, which shows up as Broken pipe.
+_WORDLIST_SCAN_MAX_BYTES = 1_500_000
+
+
 def search_binding_sources(
     uid: list[int],
     binding_wordlist: Path | None,
     binding_memory_table: Path | None,
 ) -> tuple[str | None, str, str]:
-    """Memory table first. A miss falls through to the wordlist when both were given."""
+    """Таблица UID — ответ. Словарь читается только если таблицы нет и файл небольшой."""
     problems: list[str] = []
+    table_answered = False
     if binding_memory_table is not None:
         if not binding_memory_table.is_file():
             problems.append(f"таблица не найдена: {binding_memory_table}")
@@ -109,20 +115,32 @@ def search_binding_sources(
             except Exception as exc:
                 problems.append(f"таблица не читается: {exc}")
             else:
+                table_answered = True
                 if phrase:
                     return phrase, binding_memory_table.name, ""
                 problems.append(f"в {binding_memory_table.name} нет фразы для UID")
-    if binding_wordlist is not None:
-        if not binding_wordlist.is_file():
-            problems.append(f"словарь не найден: {binding_wordlist}")
-        else:
-            try:
-                phrase = crack_binding_phrase(uid, binding_wordlist)
-            except (OSError, ValueError) as exc:
-                problems.append(f"словарь не читается: {exc}")
-                return None, binding_wordlist.name, "; ".join(problems)
-            if phrase:
-                return phrase, binding_wordlist.name, ""
-            problems.append(f"в {binding_wordlist.name} нет фразы для UID")
-            return None, binding_wordlist.name, "; ".join(problems)
-    return None, "", "; ".join(problems)
+    if table_answered or binding_wordlist is None:
+        return None, "", "; ".join(problems)
+    if not binding_wordlist.is_file():
+        problems.append(f"словарь не найден: {binding_wordlist}")
+        return None, "", "; ".join(problems)
+    try:
+        size = binding_wordlist.stat().st_size
+    except OSError as exc:
+        problems.append(f"словарь не читается: {exc}")
+        return None, binding_wordlist.name, "; ".join(problems)
+    if size > _WORDLIST_SCAN_MAX_BYTES:
+        problems.append(
+            f"{binding_wordlist.name} слишком большой для перебора в браузере. "
+            "Нужна таблица UID от strela setup."
+        )
+        return None, binding_wordlist.name, "; ".join(problems)
+    try:
+        phrase = crack_binding_phrase(uid, binding_wordlist)
+    except (OSError, ValueError) as exc:
+        problems.append(f"словарь не читается: {exc}")
+        return None, binding_wordlist.name, "; ".join(problems)
+    if phrase:
+        return phrase, binding_wordlist.name, ""
+    problems.append(f"в {binding_wordlist.name} нет фразы для UID")
+    return None, binding_wordlist.name, "; ".join(problems)
