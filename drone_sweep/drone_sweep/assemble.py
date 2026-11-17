@@ -291,7 +291,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
                         confirmed(heard, "bin MSG", "плата написала, какой протокол пульта она приняла"),
                     )
         card.put("modes", confirmed(modes, "bin MODE") if modes else missing("в .BIN нет MODE", "bin"))
-        card.put("log_schema", confirmed(log_inventory(rows), "bin DFReader", "какие записи есть в журнале. Служебные кадры свёрнуты, полные строки остаются в card.json"))
+        card.put("log_schema", confirmed(log_inventory(rows), "bin DFReader", "состав открытого журнала. Число — сколько раз записана строка, не настройка."))
         events = [dict(row) for row in rows if row.get("name") == "EV"]
         for event in events:
             event.pop("name", None)
@@ -862,7 +862,7 @@ def _absorb_mavlink(card: Card, rows: list[dict], source: str = "tlog") -> None:
     if logs:
         card.put(
             "dataflash_logs",
-            confirmed(logs, f"{source} LOG_ENTRY", "список журналов на плате. Стирание не отправлялось."),
+            confirmed(logs, f"{source} LOG_ENTRY", "файлы журнала в памяти платы. Карточка открывает последний ненулевой."),
         )
     radios = [row for row in rows if row.get("name") == "RADIO_STATUS"]
     if radios:

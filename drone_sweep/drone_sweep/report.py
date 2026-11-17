@@ -206,10 +206,18 @@ def _log_summary(value: dict) -> str:
         if isinstance(entry, dict):
             service += int(entry.get("count") or 0)
     if service:
-        lines.append(f"<li>Служебные кадры журнала — {service}. Их поля в карточку не выписываются.</li>")
-    if not lines:
-        return "<p>—</p>"
-    return "<ul>" + "".join(lines) + "</ul>"
+        lines.append(f"<li>Служебные расчёты платы — {service}. Их читать не нужно.</li>")
+    dataflash = any(name in value for name in ("RCIN", "PARM", "BARO", "MSG"))
+    if dataflash and "GPS" not in seen and "GPS2" not in seen:
+        action = "Спутников в этом журнале нет, поэтому маршрута из него не будет. Смотрите то, что в списке есть: стики, высота, батарея, моторы."
+    else:
+        action = "Строка есть в списке — она уже разобрана в карточке. Строки нет — плата это не писала, значение не появится."
+    intro = "Это состав одного открытого файла. Число — сколько раз плата записала строку. Это не настройка, менять его не нужно."
+    return (
+        f"<p>{html.escape(intro)}</p><ul>"
+        + "".join(lines)
+        + f"</ul><p>Что делать: {html.escape(action)}</p>"
+    )
 
 
 def _message_lines(value: list) -> str:
@@ -257,6 +265,8 @@ def _value_html(value) -> str:
         return _log_summary(value)
     if isinstance(value, list) and value and all(isinstance(item, dict) and "text" in item for item in value):
         return _message_lines(value)
+    if isinstance(value, list) and value and all(isinstance(item, dict) and item.get("name") == "LOG_ENTRY" for item in value):
+        return _logs_on_board(value)
     if isinstance(value, dict) and value and all(isinstance(item, list) for item in value.values()):
         rows = []
         for name, lines in value.items():
@@ -306,6 +316,41 @@ def _event_cell(key: str, value) -> str:
     if isinstance(value, (int, float)):
         return _plain_number(value)
     return "" if value is None else str(value)
+
+
+def _bytes_plain(size: int) -> str:
+    if size >= 1024:
+        return f"{round(size / 1024)} КБ"
+    return f"{size} байт"
+
+
+def _logs_on_board(rows: list) -> str:
+    """LOG_ENTRY list: how many journals sit on the board, and which one this card opened."""
+    files = []
+    total = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            ident = int(row.get("id"))
+            size = int(row.get("size") or 0)
+        except (TypeError, ValueError):
+            continue
+        total = max(total, int(row.get("num_logs") or 0))
+        files.append((ident, size))
+    if not files:
+        return "<p>Плата не прислала ни одного журнала.</p>"
+    total = total or len(files)
+    nonempty = [item for item in files if item[1] > 0]
+    newest = max(nonempty) if nonempty else None
+    lines = [f"На плате журналов: {total}."]
+    if newest:
+        lines.append(f"Эта карточка открыла последний ненулевой: номер {newest[0]}, {_bytes_plain(newest[1])}.")
+    earlier = len(nonempty) - (1 if newest else 0)
+    if earlier > 0:
+        lines.append(f"Более ранних журналов: {earlier}. Эта карточка их не открывает.")
+    lines.append("Что делать: читать карточку, она уже по открытому журналу. Старые журналы с платы не стирайте. Другой вылет — это другой номер в этом списке.")
+    return "".join(f"<p>{html.escape(line)}</p>" for line in lines)
 
 
 def _record_table(value) -> str:
