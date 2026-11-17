@@ -388,7 +388,9 @@ def explain_page() -> bytes:
 
 
 class StrelaHandler(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
+    # Как штатный http.server и ответы ExpressLRS с Connection: close:
+    # HTTP/1.0, одно соединение на запрос. HTTP/1.1 здесь обрывает форму.
+    protocol_version = "HTTP/1.0"
 
     def handle(self) -> None:
         try:
@@ -502,9 +504,11 @@ class StrelaHandler(BaseHTTPRequestHandler):
         return
 
     def _send(self, code: int, body: bytes, content_type: str = "text/html; charset=utf-8") -> None:
+        self.close_connection = True
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
