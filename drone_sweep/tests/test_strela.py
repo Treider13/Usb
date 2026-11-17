@@ -20,6 +20,7 @@ def test_menu_builds_the_b162_card(tmp_path: Path):
     boxes = tmp_path / "boxes.txt"
     boxes.write_text(BOXES, encoding="utf-8")
     out = tmp_path / "out"
+    # dump and boxnames are filled, out is last, every question in between stays empty.
     blanks = [""] * (len(QUESTIONS) - 3)
     lines = ["1", str(dump), str(boxes), *blanks, str(out), "5"]
     text = run_menu(lines)

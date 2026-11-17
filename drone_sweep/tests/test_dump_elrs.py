@@ -59,7 +59,9 @@ def test_orange_does_not_use_elrs_binding_crack(tmp_path: Path):
     )
     crack = card.fields["radio_binding_phrase_crack"]
     assert crack.status == "not_applicable"
-    assert "Orange" in crack.reason or "Orange" in crack.value
+    assert "SPEKTRUM2048" in crack.reason
+    assert "OrangeRX" in crack.reason
+    assert "test" not in json.dumps(card.to_dict())
 
 
 def test_milelrs_binding_crack_with_uid(tmp_path: Path):

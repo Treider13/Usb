@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .elrs_binding import parse_uid_field
@@ -35,14 +36,7 @@ def try_binding_phrase_crack(
 
     protocol = binding_crack_supported(card)
     if protocol not in BINDING_UID_PROTOCOLS:
-        card.put(
-            "radio_binding_phrase_crack",
-            not_applicable(
-                f"подбор UID по фразе только для ExpressLRS/MILELRS; "
-                f"у OrangeRX — DSM (SPEKTRUM), у {protocol or 'неизвестного приёмника'} — свой механизм",
-                "binding crack",
-            ),
-        )
+        card.put("radio_binding_phrase_crack", not_applicable(_refusal(protocol), "binding crack"))
         return
 
     uid_field = card.fields.get("radio_uid")
@@ -61,15 +55,10 @@ def try_binding_phrase_crack(
         card.put("radio_binding_phrase_crack", missing(str(exc), "binding crack"))
         return
 
-    phrase: str | None = None
-    source = ""
-    if binding_memory_table is not None:
-        store = load_memory_table(binding_memory_table)
-        phrase = crack_binding_phrase_from_store(uid, store)
-        source = binding_memory_table.name
-    elif binding_wordlist is not None:
-        phrase = crack_binding_phrase(uid, binding_wordlist)
-        source = binding_wordlist.name
+    phrase, source, problem = search_binding_sources(uid, binding_wordlist, binding_memory_table)
+    if problem and phrase is None and not source:
+        card.put("radio_binding_phrase_crack", missing(problem, "binding crack"))
+        return
 
     if phrase:
         card.put(
@@ -77,7 +66,7 @@ def try_binding_phrase_crack(
             confirmed(
                 "найдена",
                 "binding crack",
-                f"{protocol}, словарь {source}; текст фразы в карточку не сохраняется",
+                f"{protocol}, источник {source}; текст фразы в карточку не сохраняется",
             ),
         )
         return
@@ -85,3 +74,49 @@ def try_binding_phrase_crack(
         "radio_binding_phrase_crack",
         missing(f"в {source} нет фразы для UID ({protocol})", "binding crack"),
     )
+
+
+def _refusal(protocol: str | None) -> str:
+    if protocol in {"SPEKTRUM2048", "SPEKTRUM1024"}:
+        return (
+            "подбор UID по фразе только для ExpressLRS и MILELRS. "
+            f"{protocol} — класс DSM2/DSMX, приёмники OrangeRX входят в него. Формула ELRS к ним не применяется."
+        )
+    if protocol:
+        return (
+            "подбор UID по фразе только для ExpressLRS и MILELRS. "
+            f"Протокол {protocol} этой формулой не считается."
+        )
+    return "протокол приёмника не подтверждён. Подбор UID не запускался."
+
+
+def search_binding_sources(
+    uid: list[int],
+    binding_wordlist: Path | None,
+    binding_memory_table: Path | None,
+) -> tuple[str | None, str, str]:
+    """Memory table first. A miss falls through to the wordlist when both were given."""
+    problems: list[str] = []
+    if binding_memory_table is not None:
+        if not binding_memory_table.is_file():
+            problems.append(f"таблица не найдена: {binding_memory_table}")
+        else:
+            try:
+                store = load_memory_table(binding_memory_table)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                problems.append(f"таблица не читается: {exc}")
+            else:
+                phrase = crack_binding_phrase_from_store(uid, store)
+                if phrase:
+                    return phrase, binding_memory_table.name, ""
+                problems.append(f"в {binding_memory_table.name} нет фразы для UID")
+    if binding_wordlist is not None:
+        if not binding_wordlist.is_file():
+            problems.append(f"словарь не найден: {binding_wordlist}")
+        else:
+            phrase = crack_binding_phrase(uid, binding_wordlist)
+            if phrase:
+                return phrase, binding_wordlist.name, ""
+            problems.append(f"в {binding_wordlist.name} нет фразы для UID")
+            return None, binding_wordlist.name, "; ".join(problems)
+    return None, "", "; ".join(problems)

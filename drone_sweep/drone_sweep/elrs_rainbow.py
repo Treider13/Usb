@@ -1,4 +1,4 @@
-"""Подбор binding phrase ExpressLRS: словарь и radужная таблица (CIRCL elrs_rainbow / elrs_do_rainbow).
+"""Подбор binding phrase ExpressLRS: словарь и радужная таблица (CIRCL elrs_rainbow / elrs_do_rainbow).
 
 Источник: CIRCL/Drone-Forensic (AGPL-3.0).
 """

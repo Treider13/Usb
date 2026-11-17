@@ -41,10 +41,13 @@ def parse_uid_bytes(text: str) -> list[int]:
 
 
 def parse_uid_field(text: str) -> list[int]:
-    """UID из карточки: '1,2,3,4,5,6' или шестнадцатеричные пары."""
+    """UID из карточки или вкладки: десятичные байты, пары hex или 12 символов hex."""
     stripped = text.strip()
-    if re.fullmatch(r"[\d,\s]+", stripped):
+    if re.fullmatch(r"[\d,\s]+", stripped) and "," in stripped:
         return parse_uid_bytes(stripped)
+    compact = re.sub(r"[\s:]", "", stripped)
+    if re.fullmatch(r"[0-9a-fA-F]{12}", compact):
+        return [int(compact[index : index + 2], 16) for index in range(0, 12, 2)]
     segments = re.split(r"[\s:,;]+", stripped)
     if len(segments) == 6 and all(re.fullmatch(r"[0-9a-fA-F]{1,2}", segment) for segment in segments):
         return [int(segment, 16) for segment in segments]
