@@ -20,6 +20,7 @@ from drone_sweep.usb_read import (
     msp_request,
     msp_variant_name,
     read_mavlink_parameters,
+    SerialMavlink,
 )
 from drone_sweep.webapp import home_page
 from tests.bin_builder import write_bin
@@ -109,7 +110,7 @@ def test_two_receiver_protocols_are_not_collapsed(tmp_path: Path):
 
 def test_usb_read_sends_dump_all_and_builds_the_card(tmp_path: Path):
     port = _scripted_fc()
-    text, boxes = collect_flight_controller(port)
+    text, boxes, identity = collect_flight_controller(port)
     assert "TANTOF405" in text
     assert boxes == "ARM;ANGLE"
     written = b"".join(port.written)
@@ -149,6 +150,10 @@ def _scripted_fc() -> ScriptedPort:
     reply = bytes([ord("$"), ord("M"), ord(">"), size, 116]) + payload + bytes([checksum])
     return ScriptedPort(
         chunks=[
+            b"",
+            b"",
+            b"",
+            b"",
             reply,
             b"#\r\n",
             b"# Betaflight / STM32F405 4.5.0\r\n#\r\n",
@@ -253,7 +258,76 @@ def test_bare_exit_is_refused_because_it_reboots():
     assert "cliReboot" in note
 
 
-def test_a_short_parameter_list_is_marked_incomplete():
+def test_msp_identity_uses_betaflight_and_inav_layouts():
+    from drone_sweep.msp_identity import MSP_BOARD_INFO, MSP_BUILD_INFO, MSP_FC_VERSION, describe_identity
+
+    beta = describe_identity(
+        {
+            MSP_FC_VERSION: bytes([25, 3, 0, 5]) + b"4.5.0",
+            MSP_BOARD_INFO: (
+                b"S405"
+                + (0).to_bytes(2, "little")
+                + bytes([2, 1, 9])
+                + b"STM32F405"
+                + bytes([9])
+                + b"TANTOF405"
+                + bytes([3])
+                + b"TBS"
+            ),
+            MSP_BUILD_INFO: b"Mar 01 2025" + b"12:00:00" + b"abcdef0",
+        },
+        "betaflight",
+    )
+    assert beta["fc_version"]["version"] == "4.5.0"
+    assert beta["fc_version"]["year_since_2000"] == 25
+    assert beta["board"]["board_name"] == "TANTOF405"
+    assert beta["board"]["osd_label"] == "MAX7456"
+    assert beta["build"]["git"] == "abcdef0"
+
+    inav = describe_identity(
+        {
+            MSP_FC_VERSION: bytes([7, 0, 0]),
+            MSP_BOARD_INFO: b"MF45" + (0).to_bytes(2, "little") + bytes([2, 1, 9]) + b"MATEKF405",
+            MSP_BUILD_INFO: b"Mar 01 2025" + b"12:00:00" + b"01234567",
+        },
+        "inav",
+    )
+    assert inav["fc_version"]["version"] == "7.0.0"
+    assert inav["board"]["target_name"] == "MATEKF405"
+    assert "board_name" not in inav["board"]
+    assert inav["board"]["osd_label"] == "OSD на плате"
+    assert inav["build"]["git"] == "01234567"
+
+
+def test_a_missing_parameter_index_is_read_again_not_written():
+    class Link:
+        def __init__(self):
+            self.target_system = 1
+            self.target_component = 1
+            self.mav = self
+            self.sent = []
+            self.left = [_Param("A", 1.0, 0, 2)]
+            self.fill = [_Param("B", 2.0, 1, 2)]
+
+        def param_request_list_send(self, system, component):
+            self.sent.append(("list", system, component))
+
+        def param_request_read_send(self, system, component, param_id, index):
+            self.sent.append(("read", index, param_id))
+
+        def recv_match(self, type=None, blocking=False, timeout=None):
+            if self.left:
+                return self.left.pop(0)
+            if self.fill and any(item[0] == "read" for item in self.sent):
+                return self.fill.pop(0)
+            return None
+
+    link = Link()
+    rows, note = read_mavlink_parameters(link)
+    assert note == ""
+    assert [row["param_id"] for row in rows] == ["A", "B"]
+    assert ("read", 1, b"\x00" * 16) in link.sent
+    assert "set" not in [item[0] for item in link.sent]
     class Link:
         def __init__(self):
             self.target_system = 1
@@ -318,3 +392,180 @@ def test_quiet_port_keeps_reading_until_the_prompt():
 
 def _parm(time_us: int, name: str, value: float) -> tuple:
     return ("PARM", "QNf", "TimeUS,Name,Value", (time_us, name.encode("ascii"), value))
+
+
+def test_one_usb_read_keeps_every_parameter_frame():
+    from io import BytesIO
+
+    from pymavlink.dialects.v20 import ardupilotmega as dialect
+
+    buf = BytesIO()
+    encoder = dialect.MAVLink(buf, srcSystem=1, srcComponent=1)
+    for index in range(3):
+        encoder.param_value_send(f"P{index}".encode("ascii"), float(index), 9, 3, index)
+    raw = _Burst([buf.getvalue()])
+    link = SerialMavlink(raw, {"src_system": 1, "src_component": 1})
+    names = []
+    for _ in range(3):
+        message = link.recv_match(type="PARAM_VALUE", timeout=0.2)
+        assert message is not None
+        names.append(str(message.param_id).rstrip("\x00"))
+    assert names == ["P0", "P1", "P2"]
+    assert link.recv_match(type="PARAM_VALUE", timeout=0) is None
+
+
+class _Burst:
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+
+    def read(self, size: int) -> bytes:
+        if not self.chunks:
+            return b""
+        return self.chunks.pop(0)
+
+    def write(self, data: bytes) -> None:
+        return None
+
+    def flush(self) -> None:
+        return None
+
+
+def test_ardupilot_version_banner_and_log_list_reach_the_card():
+    card = assemble(
+        Inputs(
+            mavlink_rows=[
+                {"name": "HEARTBEAT", "autopilot": 3, "type": 2},
+                {
+                    "name": "AUTOPILOT_VERSION",
+                    "major": 4,
+                    "minor": 5,
+                    "patch": 7,
+                    "fw_type": 255,
+                    "board_version": 123 << 16,
+                    "board_id": 123,
+                    "flight_custom_version": "abc",
+                    "uid2": "0011",
+                    "vendor_id": 0x1209,
+                    "product_id": 0x5740,
+                    "flight_sw_version": 0,
+                },
+                {"name": "STATUSTEXT", "text": "ArduCopter V4.5.7 (abc)"},
+                {"name": "LOG_ENTRY", "id": 3, "num_logs": 3, "last_log_num": 3, "time_utc": 0, "size": 4096},
+            ]
+        )
+    )
+    assert card.family == "ardupilot"
+    assert card.raw_banner == "ArduCopter V4.5.7 (abc)"
+    assert card.fields["autopilot_version"].value["board_id"] == 123
+    assert card.fields["mcu_id"].value == "0011"
+    assert card.fields["dataflash_logs"].value[0]["size"] == 4096
+    page = __import__("drone_sweep.report", fromlist=["render_html"]).render_html(card)
+    assert "Версия прошивки" in page
+    assert "Журналы на плате" in page
+
+
+def test_dataflash_download_saves_the_newest_log_and_never_erases(tmp_path: Path):
+    from drone_sweep.ardupilot_read import read_dataflash, request_autopilot_version
+    from tests.bin_builder import write_bin
+    from tests.test_card import _msg
+
+    source = tmp_path / "source.BIN"
+    write_bin(source, [_msg(1, "ArduCopter V4.5.7")])
+    blob = source.read_bytes()
+    messages = [_Entry(1, 2, 2, 0, 0), _Entry(2, 2, 2, 0, len(blob))]
+    offset = 0
+    while offset < len(blob):
+        piece = blob[offset:offset + 90]
+        messages.append(_LogData(2, offset, piece))
+        offset += len(piece)
+    board = _Board(messages)
+    request_autopilot_version(board)
+    rows, path, note = read_dataflash(board, tmp_path / "out")
+    assert path is not None
+    assert path.read_bytes() == blob
+    assert "скачан журнал 2" in note
+    names = [name for name, _args in board.sent]
+    assert "log_erase" not in names
+    assert "param_set" not in names
+    assert "log_request_list" in names
+    assert "log_request_data" in names
+    assert "log_request_end" in names
+    assert ("command_long", (1, 1, 520, 0, 1, 0, 0, 0, 0, 0, 0)) in board.sent
+    assert all(item[1][2] == 0 for item in board.sent if item[0] == "heartbeat")
+    card = assemble(Inputs(bin_path=path, mavlink_rows=[{"name": "HEARTBEAT", "autopilot": 3}, *rows]))
+    assert any(row.get("text") == "ArduCopter V4.5.7" for row in card.fields["messages"].value)
+
+
+def test_armed_board_is_not_disarmed_and_the_log_is_not_invented(tmp_path: Path):
+    from drone_sweep.ardupilot_read import read_dataflash
+
+    board = _Board([_Status("Disarm for log download")])
+    rows, path, note = read_dataflash(board, tmp_path)
+    assert path is None
+    assert rows == [{"name": "STATUSTEXT", "text": "Disarm for log download"}]
+    assert "взведение не снимает" in note
+    assert "log_request_data" not in [name for name, _args in board.sent]
+    assert "log_erase" not in [name for name, _args in board.sent]
+
+
+class _Board:
+    def __init__(self, messages):
+        self.messages = list(messages)
+        self.sent = []
+        self.target_system = 1
+        self.target_component = 1
+        self.mav = self
+
+    def heartbeat_send(self, *args):
+        self.sent.append(("heartbeat", args))
+
+    def command_long_send(self, *args):
+        self.sent.append(("command_long", args))
+
+    def log_request_list_send(self, *args):
+        self.sent.append(("log_request_list", args))
+
+    def log_request_data_send(self, *args):
+        self.sent.append(("log_request_data", args))
+
+    def log_request_end_send(self, *args):
+        self.sent.append(("log_request_end", args))
+
+    def recv_match(self, type=None, blocking=False, timeout=None):
+        wanted = None if type is None else {type} if isinstance(type, str) else set(type)
+        for index, message in enumerate(self.messages):
+            if wanted is None or message.get_type() in wanted:
+                return self.messages.pop(index)
+        return None
+
+
+class _Entry:
+    def __init__(self, ident, num_logs, last_log_num, time_utc, size):
+        self.id = ident
+        self.num_logs = num_logs
+        self.last_log_num = last_log_num
+        self.time_utc = time_utc
+        self.size = size
+
+    def get_type(self):
+        return "LOG_ENTRY"
+
+
+class _LogData:
+    def __init__(self, ident, ofs, data: bytes):
+        self.id = ident
+        self.ofs = ofs
+        self.count = len(data)
+        self.data = data
+
+    def get_type(self):
+        return "LOG_DATA"
+
+
+class _Status:
+    def __init__(self, text):
+        self.text = text
+
+    def get_type(self):
+        return "STATUSTEXT"
+

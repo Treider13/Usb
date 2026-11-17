@@ -20,7 +20,7 @@ def test_report_names_fields_in_russian_and_keeps_every_key():
     for name in card.fields:
         assert f">{name}<" in page or f">{name}</p>" in page
     assert 'class="key">' in page
-    assert "--primary-500: #ff2b2b" in page
+    assert "--primary-500: #ffbb00" in page
     assert "#e5f6e5" not in page
 
 
@@ -33,6 +33,7 @@ def test_menu_pages_use_the_same_sheet():
         assert "Liberation Sans" in body
     assert "Собрать карточку" in home
     assert "Подключение по USB" in home
+    assert "журнал .BIN" in home
     assert "Собрать карточку" in form
     assert "dump all" in form
     assert "парол" in explain.lower()

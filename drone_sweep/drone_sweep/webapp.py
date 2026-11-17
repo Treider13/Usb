@@ -34,19 +34,23 @@ FORM_FIELDS = (
 )
 
 
-def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
-    steps = "".join(f"<li>{html.escape(step)}</li>" for step in WORKFLOW)
-    choices = ports if ports is not None else []
-    if ports is None:
-        from .usb_read import describe_ports
+def _ports(ports: list[tuple[str, str]] | None) -> list[tuple[str, str]]:
+    if ports is not None:
+        return ports
+    from .usb_read import describe_ports
 
-        choices = describe_ports()
-    if choices:
-        options = "".join(
-            f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
-            for device, label in choices
-        )
-        usb = f"""
+    return describe_ports()
+
+
+def connect_bar(ports: list[tuple[str, str]] | None = None) -> str:
+    choices = _ports(ports)
+    if not choices:
+        return '<p class="connect">Порт не виден. Подключите полётник кабелем USB и обновите страницу.</p>'
+    options = "".join(
+        f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
+        for device, label in choices
+    )
+    return f"""
 <form class="connect" method="post" action="/usb">
 <select name="port" aria-label="USB-порт">{options}</select>
 <span class="baud">115200</span>
@@ -54,24 +58,84 @@ def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
 <button type="submit">Считать</button>
 </form>
 """
-    else:
-        usb = '<p class="connect">Порт не виден. Подключите полётник кабелем USB и обновите страницу.</p>'
-    inner = f"""
-<header class="topbar">
-<div class="brand">{APP_NAME}</div>
-{usb}
-</header>
-<h2>Подключение по USB</h2>
-<p class="lede">Выберите порт в верхней полосе и нажмите «Считать». Скорость 115200, как в списке конфигуратора. Программа сама отличит Betaflight, INAV, Cleanflight и MAVLink и снимет только чтение.</p>
-<div class="actions">
-<a class="action quiet" href="/assemble">Собрать карточку из файлов</a>
-<a class="action quiet" href="/explain">Подсказки</a>
-<a class="action quiet" href="/design/1">Пять видов карточки</a>
+
+
+def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
+    inner = """
+<section class="hero">
+<h1>Стрела</h1>
+<p class="lede">Стрела читает полётник и собирает карточку. Она сама отличает Betaflight, INAV, Cleanflight и ArduPilot. В карточке видно, какая плата, какая сборка, какие порты, какая частота картинки и что записано в журнале. В плату ничего не записывается: нет прошивки, нет стирания, нет сохранения настроек.</p>
+</section>
+<div class="cards">
+<article class="panel"><h2>Подключение по USB</h2><p>В верхней полосе выберите порт. Скорость 115200, как в конфигураторе. Кнопка «Считать» открывает порт один раз и снимает только чтение.</p></article>
+<article class="panel"><h2>Чтение</h2><p>Окно как у программатора: слева плата и сборка, справа переключатели того, что снимать. Переключатель не прошивает плату.</p></article>
+<article class="panel"><h2>Журнал</h2><p>С ArduPilot запрашиваются версия, все параметры и последний журнал .BIN. Если борт взведён, плата журнал не отдаёт, и Стрела взведение не снимает.</p></article>
+<article class="panel"><h2>Карточка</h2><p>Пустая клетка остаётся пустой, рядом причина. Зелёная пометка — значение прочитано. Синяя — надпись с шильдика.</p></article>
 </div>
-<h2>Порядок</h2>
-<ol class="steps">{steps}</ol>
+<p><a class="action" href="/read">Открыть чтение</a> <a class="action quiet" href="/assemble">Собрать карточку из файлов</a> <a class="action quiet" href="/design/1">Пять видов карточки</a></p>
 """
-    return page(APP_NAME, inner).encode("utf-8")
+    return page(APP_NAME, inner, connect=connect_bar(ports), current="/").encode("utf-8")
+
+
+def read_page(ports: list[tuple[str, str]] | None = None) -> bytes:
+    choices = _ports(ports)
+    if choices:
+        options = "".join(
+            f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
+            for device, label in choices
+        )
+        port_field = f'<select name="port" aria-label="USB-порт">{options}</select>'
+    else:
+        port_field = '<p>Порт не виден. Подключите полётник и обновите страницу.</p>'
+    switches = "".join(
+        f"""
+<div class="row">
+<div><strong>{html.escape(title)}</strong><p>{html.escape(help_text)}</p></div>
+<label class="switch"><input type="checkbox" name="{html.escape(name)}" value="1" checked><span class="track"></span></label>
+</div>
+"""
+        for name, title, help_text in (
+            ("read_msp", "Плата и сборка", "Версия, имя платы, дата сборки и имя борта. Те же ответы MSP, что конфигуратор показывает до прошивки."),
+            ("read_dump", "Дамп настроек", "version, status и dump all. Для Betaflight после дампа уходит exit noreboot. Для INAV exit не уходит: он перезагружает плату."),
+            ("read_params", "Параметры ArduPilot", "Весь список PARAM_REQUEST_LIST. Пропущенный номер запрашивается ещё раз чтением, значение не пишется."),
+            ("read_bin", "Журнал .BIN", "Последний ненулевой журнал с платы. Стирание журнала не отправляется."),
+        )
+    )
+    button = "<p><button type=\"submit\">Считать с платы</button></p>" if choices else ""
+    inner = f"""
+<h1>Чтение</h1>
+<p class="lede">Слева то, что конфигуратор называет платой и сборкой. Справа переключатели: что снять с борта. Кнопка читает. Прошивка на плату не отправляется.</p>
+<form method="post" action="/usb">
+<input type="hidden" name="chooser" value="1">
+<div class="split">
+<section class="panel">
+<h2>Плата</h2>
+<div class="row"><div><strong>Порт</strong><p>Тот же список, что в верхней полосе.</p></div></div>
+{port_field}
+<p class="baud">115200</p>
+<label class="folder">Папка <input name="out" value="strela-out" aria-label="Папка отчёта"></label>
+<p>Имя платы, версия и дата сборки появятся в карточке после чтения. Пока борт не ответил, эти строки не выдумываются.</p>
+</section>
+<section class="panel">
+<h2>Сборка</h2>
+{switches}
+</section>
+</div>
+{button}
+</form>
+"""
+    return page(f"{APP_NAME} — чтение", inner, connect=connect_bar(ports), current="/read").encode("utf-8")
+
+
+def _wants(form: dict[str, str]) -> dict | None:
+    if form.get("chooser") != "1":
+        return None
+    return {
+        "msp": form.get("read_msp") == "1",
+        "dump": form.get("read_dump") == "1",
+        "params": form.get("read_params") == "1",
+        "bin": form.get("read_bin") == "1",
+    }
 
 
 def form_page() -> bytes:
@@ -84,35 +148,33 @@ def form_page() -> bytes:
         for name, title, help_text in FORM_FIELDS
     )
     inner = f"""
-<header class="topbar"><a class="brand" href="/">Стрела</a></header>
 <h1>Собрать карточку</h1>
 <p class="lede">Впишите пути к файлам на этом компьютере. Пустой путь пропускается. Программа ничего не пишет в полётник.</p>
 <form method="post" action="/assemble">
 {labels}
 <p><button type="submit">Собрать карточку</button></p>
 </form>
-<p><a class="action quiet" href="/">Назад</a></p>
 """
-    return page(f"{APP_NAME} — сборка", inner).encode("utf-8")
+    return page(f"{APP_NAME} — файлы", inner, connect=connect_bar(), current="/assemble").encode("utf-8")
 
 
 def explain_page() -> bytes:
     steps = "".join(f"<li>{html.escape(step)}</li>" for step in WORKFLOW)
     inner = f"""
-<header class="topbar"><a class="brand" href="/">Стрела</a></header>
 <h1>Подсказки</h1>
 <p class="lede">Идите по шагам. Если клетка красная, прочитайте причину и сделайте только то, что написано рядом.</p>
 <ol class="steps">{steps}</ol>
 <p>Если страница приёмника просит пароль, введите его сами один раз. Программа пароли не перебирает.</p>
-<p><a class="action quiet" href="/">Назад</a></p>
 """
-    return page("Подсказки", inner).encode("utf-8")
+    return page("Подсказки", inner, connect=connect_bar(), current="/explain").encode("utf-8")
 
 
 class StrelaHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path in {"/", "/index.html"}:
             self._send(200, home_page())
+        elif self.path.startswith("/read"):
+            self._send(200, read_page())
         elif self.path.startswith("/assemble"):
             self._send(200, form_page())
         elif self.path.startswith("/explain"):
@@ -154,7 +216,7 @@ class StrelaHandler(BaseHTTPRequestHandler):
             self._send(400, page("Нужен порт", "<h1>Выберите USB-порт и папку отчёта</h1><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8"))
             return
         try:
-            card = assemble(read_usb(picked))
+            card = assemble(read_usb(picked, log_dir=folder, wants=_wants(form)))
         except (OSError, ReadOnlyError, ValueError) as exc:
             body = page("Порт не ответил", f"<h1>Порт не ответил</h1><p>{html.escape(str(exc))}</p><p>Карточка не собрана.</p><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8")
             self._send(400, body)

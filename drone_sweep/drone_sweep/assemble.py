@@ -48,6 +48,7 @@ class Inputs:
     auth_declined: bool = False
     mavlink_rows: list[dict] | None = None
     read_note: str = ""
+    msp_identity: dict | None = None
 
 
 def assemble(inputs: Inputs) -> Card:
@@ -78,6 +79,8 @@ def assemble(inputs: Inputs) -> Card:
     _stm32(card, inputs.stm32_text)
     if inputs.mavlink_rows:
         _absorb_mavlink(card, inputs.mavlink_rows, source="usb")
+    if inputs.msp_identity:
+        _msp_identity(card, inputs.msp_identity)
     _route(card, inputs, rows)
     _applicability(card)
     _holes(card)
@@ -677,6 +680,30 @@ def _stm32(card: Card, text: str | None) -> None:
         card.holes.append("Журнал STM32 содержит стирание или запись. Идентификатор чипа сохранён, команда не повторяется.")
 
 
+def _msp_identity(card: Card, identity: dict) -> None:
+    """Board and build from MSP, the same replies the configurator shows before a flash."""
+    version = identity.get("fc_version")
+    if version:
+        card.put(
+            "msp_fc_version",
+            confirmed(version, "MSP_FC_VERSION", version.get("layout", "")),
+        )
+    board = identity.get("board")
+    if board:
+        card.put(
+            "msp_board",
+            confirmed(board, "MSP_BOARD_INFO", "идентификатор, имя цели и OSD из ответа MSP_BOARD_INFO"),
+        )
+        if board.get("board_name") and "board_name" not in card.fields:
+            card.put("board_name", confirmed(board["board_name"], "MSP_BOARD_INFO"))
+    build = identity.get("build")
+    if build:
+        card.put("msp_build", confirmed(build, "MSP_BUILD_INFO", "дата сборки и короткий git из MSP_BUILD_INFO"))
+    craft = identity.get("craft_name")
+    if craft and "craft_name" not in card.fields:
+        card.put("craft_name", confirmed(craft, "MSP_NAME"))
+
+
 def _nameplates(card: Card, plates: dict[str, str]) -> None:
     for key, value in plates.items():
         card.put(f"nameplate_{key}", document(value, "nameplate", "шильдик, не этот вылет и не протокол"))
@@ -702,9 +729,43 @@ def _absorb_mavlink(card: Card, rows: list[dict], source: str = "tlog") -> None:
         if name:
             params[name] = _plain(row.get("param_value"))
     if params and (card.fields.get("parameters") is None or card.fields["parameters"].status != "confirmed"):
-        card.put("parameters", confirmed(params, f"{source} PARAM_VALUE"))
+        card.put("parameters", confirmed(params, f"{source} PARAM_VALUE", f"прочитано параметров: {len(params)}"))
         _known_params(card, params, source=f"{source} PARAM_VALUE")
         _ardupilot_ports(card, params, source=f"{source} PARAM_VALUE")
+    versions = [row for row in rows if row.get("name") == "AUTOPILOT_VERSION"]
+    if versions:
+        version = versions[0]
+        card.put(
+            "autopilot_version",
+            confirmed(
+                version,
+                f"{source} AUTOPILOT_VERSION",
+                "номер прошивки из flight_sw_version. Старшие 16 бит board_version — это APJ_BOARD_ID.",
+            ),
+        )
+        if version.get("uid2") and "mcu_id" not in card.fields:
+            card.put("mcu_id", confirmed(version["uid2"], f"{source} AUTOPILOT_VERSION", "uid2 из AUTOPILOT_VERSION"))
+        banner = f"{version.get('major')}.{version.get('minor')}.{version.get('patch')}"
+        custom = version.get("flight_custom_version") or ""
+        if custom:
+            banner = f"{banner} {custom}"
+        if not card.raw_banner or card.raw_banner == "MAVLink HEARTBEAT":
+            card.raw_banner = banner
+    texts = [str(row.get("text") or "") for row in rows if row.get("name") == "STATUSTEXT" and row.get("text")]
+    if texts:
+        card.put(
+            "board_messages",
+            confirmed(texts, f"{source} STATUSTEXT", "строки, которые плата сама прислала при чтении"),
+        )
+        named = next((text for text in texts if text.lower().startswith("ardu")), "")
+        if named:
+            card.raw_banner = named
+    logs = [row for row in rows if row.get("name") == "LOG_ENTRY"]
+    if logs:
+        card.put(
+            "dataflash_logs",
+            confirmed(logs, f"{source} LOG_ENTRY", "список журналов на плате. Стирание не отправлялось."),
+        )
     radios = [row for row in rows if row.get("name") == "RADIO_STATUS"]
     if radios:
         kept = {
