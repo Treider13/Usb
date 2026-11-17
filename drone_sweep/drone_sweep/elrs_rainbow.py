@@ -92,7 +92,7 @@ def _read_wordlist_chunks(
     start_offset: int,
 ) -> Iterator[tuple[list[str], int]]:
     chunk: list[str] = []
-    next_offset = start_offset
+    next_offset = 0
     for phrase, offset in iter_wordlist_lines(wordlist, encoding=encoding, start_offset=start_offset):
         chunk.append(phrase)
         next_offset = offset
@@ -136,8 +136,9 @@ def build_rainbow_table(
     worker_count = processes if processes is not None else (os.cpu_count() or 1)
     abort = {"stop": False}
 
-    def _handle_signal(_signum, _frame) -> None:
+    def _handle_signal(signum, _frame) -> None:
         abort["stop"] = True
+        signal.signal(signum, signal.SIG_IGN)
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)

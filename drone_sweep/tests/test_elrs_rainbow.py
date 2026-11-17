@@ -1,8 +1,10 @@
+import hashlib
 from pathlib import Path
 
 from drone_sweep.elrs_binding import (
     binding_phrase_to_uid,
     binding_phrase_uid_hex,
+    hash_binding_phrases,
     parse_uid_bytes,
     parse_uid_field,
     uid_bytes_to_hex,
@@ -13,6 +15,15 @@ from drone_sweep.elrs_rainbow import MemoryRainbowStore, crack_binding_phrase, l
 def test_binding_phrase_uid_matches_circl_formula():
     assert binding_phrase_to_uid("test") == [79, 4, 253, 130, 33, 85]
     assert binding_phrase_uid_hex("test") == "4F04FD822155"
+
+
+def test_hash_batch_matches_circl_hash_batch():
+    entries = ["alpha", "beta", "gamma"]
+    ours = dict(hash_binding_phrases(entries))
+    for entry in entries:
+        define = f'-DMY_BINDING_PHRASE="{entry}"'
+        uid_hex = hashlib.md5(define.encode("utf-8")).digest()[:6].hex().upper()
+        assert ours[uid_hex] == entry
 
 
 def test_parse_uid_formats():

@@ -55,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
         print("UID (hex):", uid_bytes_to_hex(uid))
         return 0
     if parsed.command == "crack":
+        if not parsed.wordlist.is_file():
+            print(f"словарь не найден: {parsed.wordlist}", file=sys.stderr)
+            return 1
         uid = parse_uid_bytes(parsed.uid)
         phrase = crack_binding_phrase(uid, parsed.wordlist, encoding=parsed.encoding)
         if phrase is None:
@@ -77,6 +80,10 @@ def main(argv: list[str] | None = None) -> int:
         print(phrase)
         return 0
     if parsed.command == "build-rainbow":
+        wordlist_path = Path(parsed.wordlist)
+        if not wordlist_path.is_file():
+            print(f"словарь не найден: {wordlist_path}", file=sys.stderr)
+            return 1
         store = make_redis_store(
             host=parsed.kvrocks_host,
             port=parsed.kvrocks_port,
@@ -89,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"записано {batch}, всего {total}, offset={offset}")
 
         total = build_rainbow_table(
-            Path(parsed.wordlist),
+            wordlist_path,
             store,
             status_file=status,
             chunk_size=parsed.chunk_size,
