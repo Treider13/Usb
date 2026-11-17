@@ -97,15 +97,38 @@ def read_boxnames(port: ScriptedPort) -> str:
     return payload.decode("latin1", errors="replace")
 
 
-def collect_flight_controller(port, leave_cli: str | None = "exit noreboot") -> tuple[str, str]:
-    """MSP_BOXNAMES while the board is still in MSP, then the CLI dump.
+def collect_flight_controller(port, leave_cli: str | None = "exit noreboot", wants: dict | None = None) -> tuple[str, str, dict]:
+    """Read MSP identity and box names, then the CLI dump.
 
-    Names are requested first: after `#` the port is a text console and an
-    MSP frame is no longer a request. Nothing is saved.
+    Names and identity are requested first: after `#` the port is a text
+    console and an MSP frame is no longer a request. Nothing is saved.
     """
-    boxes = read_boxnames(port)
-    dump_text = read_cli(port, ["version", "status", "dump all"], leave=leave_cli)
-    return dump_text, boxes
+    chosen = wants or {"msp": True, "dump": True}
+    raw_identity: dict[int, bytes | None] = {}
+    if chosen.get("msp", True):
+        raw_identity = _read_msp_identity(port)
+    boxes = read_boxnames(port) if chosen.get("dump", True) or chosen.get("msp", True) else ""
+    dump_text = ""
+    if chosen.get("dump", True):
+        dump_text = read_cli(port, ["version", "status", "dump all"], leave=leave_cli)
+    from .msp_identity import describe_identity
+
+    identity = describe_identity(raw_identity, family_in_text(dump_text))
+    return dump_text, boxes, identity
+
+
+def _read_msp_identity(port) -> dict[int, bytes | None]:
+    from .msp_identity import MSP_BOARD_INFO, MSP_BUILD_INFO, MSP_FC_VERSION, MSP_NAME
+
+    found: dict[int, bytes | None] = {}
+    for code in (MSP_FC_VERSION, MSP_BOARD_INFO, MSP_BUILD_INFO, MSP_NAME):
+        port.write(msp_request(code))
+        frame = port.read()
+        try:
+            found[code] = _msp_payload(frame, code)
+        except ValueError:
+            found[code] = None
+    return found
 
 
 def cli_leave(kind: str) -> tuple[str | None, str]:
@@ -281,28 +304,67 @@ def read_mavlink_parameters(connection) -> tuple[list[dict], str]:
     from .ardupilot_read import gcs_heartbeat
 
     gcs_heartbeat(connection)
+    rows, expected, silent = _collect_param_rows(connection)
+    if silent and not rows:
+        gcs_heartbeat(connection)
+        rows, expected, silent = _collect_param_rows(connection)
+    _fill_missing_parameters(connection, rows, expected)
+    got = {
+        int(row["param_index"])
+        for row in rows
+        if row.get("name") == "PARAM_VALUE" and int(row.get("param_index", -1)) >= 0
+    }
+    if not rows or (expected is not None and len(got) < expected):
+        return rows, "список PARAM_VALUE оборвался: тишина 3 секунды"
+    return rows, ""
+
+
+def _collect_param_rows(connection) -> tuple[list[dict], int | None, bool]:
     connection.mav.param_request_list_send(connection.target_system, connection.target_component)
     rows: list[dict] = []
     expected: int | None = None
     while True:
         message = connection.recv_match(type="PARAM_VALUE", blocking=True, timeout=3)
         if message is None:
-            if not rows or (expected is not None and len(rows) < expected):
-                return rows, "список PARAM_VALUE оборвался: тишина 3 секунды"
-            return rows, ""
-        rows.append(
-            {
-                "name": "PARAM_VALUE",
-                "param_id": message.param_id,
-                "param_value": message.param_value,
-            }
-        )
-        expected = message.param_count
-        if message.param_index + 1 >= message.param_count:
-            return rows, ""
+            return rows, expected, True
+        rows.append(_param_row(message))
+        expected = int(message.param_count)
+        if int(message.param_index) >= 0 and int(message.param_index) + 1 >= int(message.param_count):
+            return rows, expected, False
 
 
-def read_usb(path: str, port_opener=None, mavlink_opener=None, log_dir=None) -> "Inputs":
+def _param_row(message) -> dict:
+    return {
+        "name": "PARAM_VALUE",
+        "param_id": message.param_id,
+        "param_value": message.param_value,
+        "param_index": int(message.param_index),
+        "param_count": int(message.param_count),
+    }
+
+
+def _fill_missing_parameters(connection, rows: list[dict], expected: int | None) -> None:
+    """PARAM_REQUEST_READ for indexes the list skipped. This does not write a value."""
+    send = getattr(getattr(connection, "mav", None), "param_request_read_send", None)
+    if send is None or not expected:
+        return
+    have = {
+        int(row["param_index"])
+        for row in rows
+        if row.get("name") == "PARAM_VALUE" and int(row.get("param_index", -1)) >= 0
+    }
+    for index in range(int(expected)):
+        if index in have:
+            continue
+        send(connection.target_system, connection.target_component, b"\x00" * 16, index)
+        message = connection.recv_match(type="PARAM_VALUE", blocking=True, timeout=1)
+        if message is None:
+            return
+        rows.append(_param_row(message))
+        have.add(int(message.param_index))
+
+
+def read_usb(path: str, port_opener=None, mavlink_opener=None, log_dir=None, wants: dict | None = None) -> "Inputs":
     """Identify the board the way the Configurator opens a port, then read it.
 
     Betaflight Configurator sends MSP_API_VERSION and then MSP_FC_VARIANT and
@@ -317,26 +379,34 @@ def read_usb(path: str, port_opener=None, mavlink_opener=None, log_dir=None) -> 
 
     if port_opener is not None:
         port = port_opener(path)
-        dump_text, boxes = collect_flight_controller(port)
-        return Inputs(dump_text=dump_text, boxnames=boxes)
+        dump_text, boxes, identity = collect_flight_controller(port, wants=wants)
+        return Inputs(dump_text=dump_text, boxnames=boxes, msp_identity=identity)
     port = open_betaflight_port(path)
     try:
         kind, beat = _classify(port)
         if kind == "mavlink":
             link = SerialMavlink(port.raw, beat) if mavlink_opener is None else mavlink_opener(path)
+            chosen = wants or {"params": True, "bin": True}
             try:
-                request_autopilot_version(link)
-                rows, note = read_mavlink_parameters(link)
-                for message in drain(link, ("AUTOPILOT_VERSION", "STATUSTEXT")):
-                    if message.get_type() == "AUTOPILOT_VERSION":
-                        rows.append(version_row(message))
-                    else:
-                        text = message.text
-                        if isinstance(text, bytes):
-                            text = text.decode("latin1", errors="replace")
-                        rows.append({"name": "STATUSTEXT", "text": str(text).rstrip("\x00").strip()})
-                folder = Path(log_dir) if log_dir else None
-                log_rows, log_path, log_note = read_dataflash(link, folder)
+                rows: list[dict] = []
+                note = ""
+                log_rows: list[dict] = []
+                log_path = None
+                log_note = ""
+                if chosen.get("params", True) or chosen.get("msp", True):
+                    request_autopilot_version(link)
+                    rows, note = read_mavlink_parameters(link)
+                    for message in drain(link, ("AUTOPILOT_VERSION", "STATUSTEXT")):
+                        if message.get_type() == "AUTOPILOT_VERSION":
+                            rows.append(version_row(message))
+                        else:
+                            text = message.text
+                            if isinstance(text, bytes):
+                                text = text.decode("latin1", errors="replace")
+                            rows.append({"name": "STATUSTEXT", "text": str(text).rstrip("\x00").strip()})
+                if chosen.get("bin", True):
+                    folder = Path(log_dir) if log_dir else None
+                    log_rows, log_path, log_note = read_dataflash(link, folder)
             finally:
                 close = getattr(link, "close", None)
                 if close is not None:
@@ -348,8 +418,8 @@ def read_usb(path: str, port_opener=None, mavlink_opener=None, log_dir=None) -> 
             return Inputs(mavlink_rows=rows, read_note=notes, bin_path=log_path)
         if kind in {"betaflight", "inav", "cleanflight"}:
             leave, note = cli_leave(kind)
-            dump_text, boxes = collect_flight_controller(port, leave_cli=leave)
-            return Inputs(dump_text=dump_text, boxnames=boxes, read_note=note)
+            dump_text, boxes, identity = collect_flight_controller(port, leave_cli=leave, wants=wants)
+            return Inputs(dump_text=dump_text, boxnames=boxes, read_note=note, msp_identity=identity)
     finally:
         port.raw.close()
     raise ValueError("порт не назвал Betaflight, INAV, Cleanflight и не прислал HEARTBEAT")

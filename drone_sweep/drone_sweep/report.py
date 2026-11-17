@@ -18,7 +18,10 @@ STATUS_WORD = {
 }
 
 LABELS = {
-    "board_name": "Плата",
+    "board_name": "Имя платы",
+    "msp_fc_version": "Версия прошивки MSP",
+    "msp_board": "Плата из MSP",
+    "msp_build": "Сборка",
     "craft_name": "Имя борта",
     "pilot_name": "Имя пилота",
     "device_uid": "Номер устройства",
@@ -100,7 +103,7 @@ LABELS = {
 }
 
 GROUPS = (
-    ("Кто это", ("board_name", "craft_name", "pilot_name", "device_uid", "mcu_id", "autopilot_version", "board_messages", "stm32_probe", "stm32_log_contains_write", "nameplate_vtx", "nameplate_radio", "nameplate_gimbal")),
+    ("Кто это", ("board_name", "msp_board", "msp_fc_version", "msp_build", "craft_name", "pilot_name", "device_uid", "mcu_id", "autopilot_version", "board_messages", "stm32_probe", "stm32_log_contains_write", "nameplate_vtx", "nameplate_radio", "nameplate_gimbal")),
     ("Радио", ("radio_protocol", "receiver_port", "serialrx_provider", "serial_link_class", "uart_protocol", "air_protocol", "uplink_lq", "packet_rate_log_hz", "radio_tx_packet_rate", "radio_binding_rate", "radio_rateinitialidx", "radio_rate_index", "rcin_interval_us", "mavlink_radio_status", "mavlink_rc_interval_ms", "serial_ports", "expresslrs_spi")),
     ("Видео", ("video_frequency_mhz", "video_power", "video_power_mw", "video_grid", "video_grid_lookup", "vtx_uart", "vtx_device_responded", "vtx_enable", "vtx_pitmode_configured", "vtx_switch_rules", "vtxtable", "vtx")),
     ("Маршрут", ("route_source", "route_track", "takeoff_lat", "takeoff_lon", "takeoff_time_us", "landing_time_us", "flight_duration_us", "home", "max_distance_from_home_m", "baro_alt", "mission_waypoints", "mission_file_source")),

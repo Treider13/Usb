@@ -110,7 +110,7 @@ def test_two_receiver_protocols_are_not_collapsed(tmp_path: Path):
 
 def test_usb_read_sends_dump_all_and_builds_the_card(tmp_path: Path):
     port = _scripted_fc()
-    text, boxes = collect_flight_controller(port)
+    text, boxes, identity = collect_flight_controller(port)
     assert "TANTOF405" in text
     assert boxes == "ARM;ANGLE"
     written = b"".join(port.written)
@@ -150,6 +150,10 @@ def _scripted_fc() -> ScriptedPort:
     reply = bytes([ord("$"), ord("M"), ord(">"), size, 116]) + payload + bytes([checksum])
     return ScriptedPort(
         chunks=[
+            b"",
+            b"",
+            b"",
+            b"",
             reply,
             b"#\r\n",
             b"# Betaflight / STM32F405 4.5.0\r\n#\r\n",
@@ -254,7 +258,76 @@ def test_bare_exit_is_refused_because_it_reboots():
     assert "cliReboot" in note
 
 
-def test_a_short_parameter_list_is_marked_incomplete():
+def test_msp_identity_uses_betaflight_and_inav_layouts():
+    from drone_sweep.msp_identity import MSP_BOARD_INFO, MSP_BUILD_INFO, MSP_FC_VERSION, describe_identity
+
+    beta = describe_identity(
+        {
+            MSP_FC_VERSION: bytes([25, 3, 0, 5]) + b"4.5.0",
+            MSP_BOARD_INFO: (
+                b"S405"
+                + (0).to_bytes(2, "little")
+                + bytes([2, 1, 9])
+                + b"STM32F405"
+                + bytes([9])
+                + b"TANTOF405"
+                + bytes([3])
+                + b"TBS"
+            ),
+            MSP_BUILD_INFO: b"Mar 01 2025" + b"12:00:00" + b"abcdef0",
+        },
+        "betaflight",
+    )
+    assert beta["fc_version"]["version"] == "4.5.0"
+    assert beta["fc_version"]["year_since_2000"] == 25
+    assert beta["board"]["board_name"] == "TANTOF405"
+    assert beta["board"]["osd_label"] == "MAX7456"
+    assert beta["build"]["git"] == "abcdef0"
+
+    inav = describe_identity(
+        {
+            MSP_FC_VERSION: bytes([7, 0, 0]),
+            MSP_BOARD_INFO: b"MF45" + (0).to_bytes(2, "little") + bytes([2, 1, 9]) + b"MATEKF405",
+            MSP_BUILD_INFO: b"Mar 01 2025" + b"12:00:00" + b"01234567",
+        },
+        "inav",
+    )
+    assert inav["fc_version"]["version"] == "7.0.0"
+    assert inav["board"]["target_name"] == "MATEKF405"
+    assert "board_name" not in inav["board"]
+    assert inav["board"]["osd_label"] == "OSD на плате"
+    assert inav["build"]["git"] == "01234567"
+
+
+def test_a_missing_parameter_index_is_read_again_not_written():
+    class Link:
+        def __init__(self):
+            self.target_system = 1
+            self.target_component = 1
+            self.mav = self
+            self.sent = []
+            self.left = [_Param("A", 1.0, 0, 2)]
+            self.fill = [_Param("B", 2.0, 1, 2)]
+
+        def param_request_list_send(self, system, component):
+            self.sent.append(("list", system, component))
+
+        def param_request_read_send(self, system, component, param_id, index):
+            self.sent.append(("read", index, param_id))
+
+        def recv_match(self, type=None, blocking=False, timeout=None):
+            if self.left:
+                return self.left.pop(0)
+            if self.fill and any(item[0] == "read" for item in self.sent):
+                return self.fill.pop(0)
+            return None
+
+    link = Link()
+    rows, note = read_mavlink_parameters(link)
+    assert note == ""
+    assert [row["param_id"] for row in rows] == ["A", "B"]
+    assert ("read", 1, b"\x00" * 16) in link.sent
+    assert "set" not in [item[0] for item in link.sent]
     class Link:
         def __init__(self):
             self.target_system = 1

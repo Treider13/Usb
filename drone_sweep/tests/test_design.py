@@ -20,7 +20,7 @@ def test_report_names_fields_in_russian_and_keeps_every_key():
     for name in card.fields:
         assert f">{name}<" in page or f">{name}</p>" in page
     assert 'class="key">' in page
-    assert "--primary-500: #ff2b2b" in page
+    assert "--primary-500: #ffbb00" in page
     assert "#e5f6e5" not in page
 
 

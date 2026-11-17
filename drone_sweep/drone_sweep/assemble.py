@@ -48,6 +48,7 @@ class Inputs:
     auth_declined: bool = False
     mavlink_rows: list[dict] | None = None
     read_note: str = ""
+    msp_identity: dict | None = None
 
 
 def assemble(inputs: Inputs) -> Card:
@@ -78,6 +79,8 @@ def assemble(inputs: Inputs) -> Card:
     _stm32(card, inputs.stm32_text)
     if inputs.mavlink_rows:
         _absorb_mavlink(card, inputs.mavlink_rows, source="usb")
+    if inputs.msp_identity:
+        _msp_identity(card, inputs.msp_identity)
     _route(card, inputs, rows)
     _applicability(card)
     _holes(card)
@@ -675,6 +678,30 @@ def _stm32(card: Card, text: str | None) -> None:
             confirmed(True, "stm32 log", "в журнале есть стирание или запись. Стрела эту команду не повторяет."),
         )
         card.holes.append("Журнал STM32 содержит стирание или запись. Идентификатор чипа сохранён, команда не повторяется.")
+
+
+def _msp_identity(card: Card, identity: dict) -> None:
+    """Board and build from MSP, the same replies the configurator shows before a flash."""
+    version = identity.get("fc_version")
+    if version:
+        card.put(
+            "msp_fc_version",
+            confirmed(version, "MSP_FC_VERSION", version.get("layout", "")),
+        )
+    board = identity.get("board")
+    if board:
+        card.put(
+            "msp_board",
+            confirmed(board, "MSP_BOARD_INFO", "идентификатор, имя цели и OSD из ответа MSP_BOARD_INFO"),
+        )
+        if board.get("board_name") and "board_name" not in card.fields:
+            card.put("board_name", confirmed(board["board_name"], "MSP_BOARD_INFO"))
+    build = identity.get("build")
+    if build:
+        card.put("msp_build", confirmed(build, "MSP_BUILD_INFO", "дата сборки и короткий git из MSP_BUILD_INFO"))
+    craft = identity.get("craft_name")
+    if craft and "craft_name" not in card.fields:
+        card.put("craft_name", confirmed(craft, "MSP_NAME"))
 
 
 def _nameplates(card: Card, plates: dict[str, str]) -> None:
