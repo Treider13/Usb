@@ -230,6 +230,8 @@ def test_orange_spi_protocol_is_the_cyrf_dsm_entry():
     assert card.fields["radio_protocol"].source == "dump rx_spi_protocol"
     assert card.fields["spektrum_sat_bind"].value == "0"
     assert "не отправляется" in card.fields["spektrum_sat_bind"].reason
+    assert card.fields["spektrum_channel_count"].value == 12
+    assert card.fields["orange_rx_profile"].value["nameplate"] == "OrangeRX"
 
 
 def test_orange_nameplate_without_a_provider_stays_a_sticker():

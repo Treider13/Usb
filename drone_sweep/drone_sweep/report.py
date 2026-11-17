@@ -204,6 +204,9 @@ USE = {
     "spektrum_channel_count": "Сколько каналов у Spektrum.",
     "spektrum_baud": "Скорость линии Spektrum.",
     "spektrum_sat_bind": "Импульсы привязки записаны. Команда привязки не отправляется.",
+    "orange_rx_profile": "OrangeRX / DSM: то, что сняли с полётника.",
+    "ardupilot_radio_summary": "Радио ArduPilot одним блоком: маска RC, порты, телеметрия.",
+    "rc_protocols": "Какие протоколы пульта разрешены в параметрах ArduPilot.",
 }
 
 GROUP_USE = {
@@ -216,7 +219,31 @@ GROUP_USE = {
 
 GROUPS = (
     ("Кто это", ("firmware", "board_name", "frame", "flight_os", "motor_outputs", "imu", "iomcu", "msp_board", "msp_fc_version", "msp_build", "craft_name", "pilot_name", "device_uid", "mcu_id", "autopilot_version", "board_messages", "stm32_probe", "stm32_log_contains_write", "nameplate_vtx", "nameplate_radio", "nameplate_gimbal")),
-    ("Радио", ("radio_protocol", "receiver_port", "serialrx_provider", "serial_link_class", "uart_protocol", "air_protocol", "uplink_lq", "packet_rate_log_hz", "radio_tx_packet_rate", "radio_binding_rate", "radio_rateinitialidx", "radio_rate_index", "rcin_interval_us", "mavlink_radio_status", "mavlink_rc_interval_ms", "serial_ports", "expresslrs_spi")),
+    ("Радио", (
+        "radio_protocol",
+        "receiver_port",
+        "serialrx_provider",
+        "serial_link_class",
+        "uart_protocol",
+        "air_protocol",
+        "uplink_lq",
+        "packet_rate_log_hz",
+        "radio_tx_packet_rate",
+        "radio_binding_rate",
+        "radio_rateinitialidx",
+        "radio_rate_index",
+        "rcin_interval_us",
+        "mavlink_radio_status",
+        "mavlink_rc_interval_ms",
+        "serial_ports",
+        "expresslrs_spi",
+        "spektrum_channel_count",
+        "spektrum_baud",
+        "spektrum_sat_bind",
+        "orange_rx_profile",
+        "rc_protocols",
+        "ardupilot_radio_summary",
+    )),
     ("Видео", ("video_frequency_mhz", "video_power", "video_power_mw", "video_grid", "video_grid_lookup", "vtx_uart", "vtx_device_responded", "vtx_enable", "vtx_pitmode_configured", "vtx_switch_rules", "vtxtable", "vtx")),
     ("Маршрут", ("route_source", "route_track", "takeoff_lat", "takeoff_lon", "takeoff_time_us", "landing_time_us", "flight_duration_us", "home", "max_distance_from_home_m", "baro_alt", "mission_waypoints", "mission_file_source", "blackbox_arm", "blackbox_disarm", "inav_waypoints")),
 )
@@ -250,6 +277,8 @@ def _group_of(name: str) -> str:
             return title
     if name.startswith("nameplate_"):
         return "Кто это"
+    if name in {"orange_rx_profile", "ardupilot_radio_summary", "rc_protocols"}:
+        return "Радио"
     if name.startswith("radio_"):
         return "Радио"
     if name.startswith(("video_", "vtx")):

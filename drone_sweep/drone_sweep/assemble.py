@@ -20,6 +20,12 @@ from .model import Card, confirmed, document, missing, not_applicable
 from .ports import ardupilot_ports, decode_osd_position, parse_betaflight_serial
 from .dump_elrs import public_extraction_summary
 from .elrs_assemble import try_binding_phrase_crack
+from .radio_spektrum import (
+    apply_ardupilot_dsm,
+    apply_spektrum_serial_provider,
+    apply_spektrum_spi,
+    put_ardupilot_radio_summary,
+)
 from .radio import parse_radio_image, parse_radio_json
 from .stm32 import parse_stm32_log
 from .route import (
@@ -253,6 +259,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         else:
             card.put("serialrx_provider", missing("в dump all нет serialrx_provider", "dump all"))
         spi = master_or_unique(dump, "rx_spi_protocol")
+        serial_provider = provider
         if spi is not None and spi.strip().upper() == "SPEKTRUM":
             current = card.fields.get("radio_protocol")
             if current is None or current.status != "confirmed":
@@ -264,8 +271,7 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
                         "RX_SPI_CYRF6936_DSM, имя SPEKTRUM в lookupTableRxSpi Betaflight 4.5",
                     ),
                 )
-            if "serial_link_class" not in card.fields:
-                card.put("serial_link_class", confirmed("DSM2/DSMX", "betaflight rx_spi.h"))
+            apply_spektrum_spi(card, serial_provider=serial_provider, source="dump rx_spi_protocol")
         bind = master_or_unique(dump, "spektrum_sat_bind")
         if bind is not None:
             card.put(
@@ -332,6 +338,14 @@ def _vehicle_fields(card: Card, dump, rows: list[dict]) -> None:
         _baro(card, rows)
         _messages_with_rcin(card, rows, messages)
         _rcin_interval(card, rows)
+        rc_bits = None
+        rc_field = card.fields.get("rc_protocols")
+        if rc_field is not None and rc_field.status == "confirmed" and isinstance(rc_field.value, dict):
+            rc_bits = rc_field.value.get("bits")
+        uart = card.fields.get("uart_protocol")
+        uart_text = str(uart.value) if uart is not None and uart.status == "confirmed" else None
+        apply_ardupilot_dsm(card, rc_protocol_bits=rc_bits, uart_protocol=uart_text, source="bin / MAVLink")
+        put_ardupilot_radio_summary(card)
 
 
 # printConfig emits these on every `diff all`, whether or not a setting changed.
@@ -564,24 +578,7 @@ def _serialrx_class(card: Card, provider: str) -> None:
     """
     name = provider.strip().upper()
     if name in {"SPEKTRUM2048", "SPEKTRUM1024"}:
-        channels = 12 if name == "SPEKTRUM2048" else 7
-        card.put("serial_link_class", confirmed("DSM2/DSMX", "betaflight rx.h"))
-        card.put(
-            "radio_protocol",
-            confirmed(name, "dump serialrx_provider", "класс DSM2/DSMX, приёмники OrangeRX входят в него"),
-        )
-        card.put(
-            "spektrum_channel_count",
-            confirmed(channels, "spektrum.h", "SPEKTRUM_2048_CHANNEL_COUNT или SPEKTRUM_1024_CHANNEL_COUNT"),
-        )
-        card.put(
-            "spektrum_baud",
-            confirmed(115200, "spektrum.h", "SPEKTRUM_BAUDRATE, скорость драйвера, не измерение вылета"),
-        )
-        card.put(
-            "uplink_lq",
-            not_applicable("в rx.h у SPEKTRUM нет источника LQ класса CRSF", "betaflight rx.h"),
-        )
+        apply_spektrum_serial_provider(card, name, source="dump serialrx_provider")
         return
     if name == "CRSF":
         card.put("uart_protocol", confirmed("CRSF", "dump all"))
@@ -674,13 +671,20 @@ _MOUNT_PLAIN = {
 def _known_params(card: Card, params: dict, source: str = "bin PARM") -> None:
     if "RC_PROTOCOLS" in params:
         value = int(params["RC_PROTOCOLS"])
+        bits = rc_protocols_45(value)
         card.put(
             "rc_protocols",
             confirmed(
-                {"value": value, "bits": rc_protocols_45(value)},
+                {"value": value, "bits": bits},
                 source,
                 "маска Copter 4.5: значение 1 — бит All, это не имя протокола линии",
             ),
+        )
+        apply_ardupilot_dsm(
+            card,
+            rc_protocol_bits=bits,
+            uart_protocol=None,
+            source=source,
         )
     if "MNT1_TYPE" in params:
         value = int(float(params["MNT1_TYPE"]))
@@ -997,6 +1001,15 @@ def _absorb_mavlink(card: Card, rows: list[dict], source: str = "tlog") -> None:
                 "медиана шага записей RC_CHANNELS, не пакетрейт радиолинии",
             ),
         )
+    if card.family in {"ardupilot", "mavlink"}:
+        rc_bits = None
+        rc_field = card.fields.get("rc_protocols")
+        if rc_field is not None and rc_field.status == "confirmed" and isinstance(rc_field.value, dict):
+            rc_bits = rc_field.value.get("bits")
+        uart = card.fields.get("uart_protocol")
+        uart_text = str(uart.value) if uart is not None and uart.status == "confirmed" else None
+        apply_ardupilot_dsm(card, rc_protocol_bits=rc_bits, uart_protocol=uart_text, source=source)
+        put_ardupilot_radio_summary(card)
 
 
 def _route(card: Card, inputs: Inputs, rows: list[dict]) -> None:
