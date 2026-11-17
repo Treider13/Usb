@@ -18,9 +18,15 @@ def main(argv: list[str] | None = None) -> int:
         help="обновить все словари (passhelp, dwyl, elrs_rainbow, rockyou) и RAM-таблицы",
     )
     parser.add_argument("-q", "--quiet", action="store_true")
+    parser.add_argument(
+        "--lite",
+        action="store_true",
+        help="без rockyou (~14M строк; для ПК с 4–8 ГБ RAM, достаточно для обычных фраз)",
+    )
     args = parser.parse_args(argv)
+    presets = ("passhelp", "dwyl", "elrs_rainbow") if args.lite else None
     try:
-        run_setup(data_dir=args.data_dir, force=args.force, quiet=args.quiet)
+        run_setup(data_dir=args.data_dir, force=args.force, quiet=args.quiet, presets=presets)
     except OSError as exc:
         print(str(exc), file=sys.stderr)
         return 1

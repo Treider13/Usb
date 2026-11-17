@@ -176,6 +176,7 @@ def run_setup(
     data_dir: Path | None = None,
     force: bool = False,
     quiet: bool = False,
+    presets: tuple[str, ...] | None = None,
 ) -> SetupResult:
     root = resolve_data_dir(data_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -187,7 +188,12 @@ def run_setup(
     failed: list[str] = []
     ready_wordlists: list[Path] = []
 
-    for preset in INSTALL_PRESET_ORDER:
+    order = presets if presets is not None else INSTALL_PRESET_ORDER
+    for preset in order:
+        if preset not in INSTALL_PRESET_ORDER and preset != "elrs_rainbow":
+            if not quiet:
+                print(f"Пропуск неизвестного пресета {preset}", file=sys.stderr)
+            continue
         label = WORDLIST_PRESETS.get(preset, (preset, ""))[0]
         wordlist_path = root / "wordlists" / f"{preset}.txt"
         table_path = root / "tables" / f"{preset}-memory.json"
