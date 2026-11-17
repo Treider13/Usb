@@ -39,6 +39,9 @@ def test_crack_page_has_nav_tab():
     assert "aria-current" in body
     assert "CIRCL" in body or "circl" in body.lower()
     assert "OrangeRX" in body
+    assert 'value="read_drone"' not in body
+    assert 'value="http://10.0.0.1"' not in body
+    assert "10.0.0.1" in body
 
 
 def test_handle_uid_action():
