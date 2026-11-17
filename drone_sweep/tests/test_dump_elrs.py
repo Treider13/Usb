@@ -23,6 +23,17 @@ def test_extract_json_from_binary_flash():
     assert payload["extracted"][0]["wifi-password"] == "secret-pass"
 
 
+def test_public_summary_includes_uid_hex_and_binding_md5():
+    from drone_sweep.elrs_binding import binding_phrase_md5_hex
+
+    inner = {"uid": [79, 4, 253, 130, 33, 85], "binding-phrase": "test"}
+    blob = json.dumps(inner).encode()
+    summary = public_extraction_summary(blob)
+    row = summary["extracted"][0]
+    assert row["uid_hex"] == "4F04FD822155"
+    assert row["binding_md5_hex"] == binding_phrase_md5_hex("test")
+
+
 def test_parse_radio_image_merges_elrs_json():
     inner = {"uid": [1, 2, 3, 4, 5, 6], "wifi-password": "x"}
     blob = b"ExpressLRS 3.0\x00" + json.dumps(inner).encode()

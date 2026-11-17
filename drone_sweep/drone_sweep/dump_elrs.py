@@ -9,6 +9,8 @@ import hashlib
 import json
 from typing import Any
 
+from .elrs_binding import binding_phrase_md5_hex, uid_bytes_to_hex
+
 
 def find_json_end(data: bytes, start: int) -> int | None:
     depth = 0
@@ -174,6 +176,14 @@ def payload_for_scan(file_bytes: bytes) -> tuple[bytes, str]:
     return file_bytes, "raw"
 
 
+def _stored_hash_from_config(config: dict[str, Any]) -> str | None:
+    for key in ("phrase_hash", "binding_phrase_hash", "binding-phrase-hash", "bindingPhraseHash"):
+        value = config.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def binding_phrase_from_config(config: dict[str, Any]) -> str | None:
     """Строка привязки из JSON flash/WebUI, если прошивка её не вырезала."""
     for key in ("binding-phrase", "binding_phrase", "bindingPhrase", "MY_BINDING_PHRASE"):
@@ -194,11 +204,20 @@ def public_extraction_summary(file_bytes: bytes, *, reveal_wifi_password: bool =
         uid = uid_list_to_field(entry.get("uid"))
         if uid:
             item["uid"] = uid
+            try:
+                parts = [int(p) for p in uid.split(",")]
+                item["uid_hex"] = uid_bytes_to_hex(parts)
+            except ValueError:
+                pass
         config = entry.get("config")
         if isinstance(config, dict):
             phrase = binding_phrase_from_config(config)
             if phrase:
                 item["binding_phrase"] = phrase
+                item["binding_md5_hex"] = binding_phrase_md5_hex(phrase)
+            stored = _stored_hash_from_config(config)
+            if stored:
+                item["phrase_hash_in_flash"] = stored
         if entry.get("wifi_ssid"):
             item["wifi_ssid"] = entry["wifi_ssid"]
         if entry.get("wifi_password"):

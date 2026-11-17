@@ -12,9 +12,17 @@ from pathlib import Path
 from typing import Iterator, Sequence
 
 
+def binding_define_string(bind_phrase: str) -> str:
+    return f'-DMY_BINDING_PHRASE="{bind_phrase}"'
+
+
+def binding_phrase_md5_hex(bind_phrase: str) -> str:
+    """Полный MD5 строки define, как при сборке ExpressLRS (мертвый отпечаток фразы в прошивке)."""
+    return hashlib.md5(binding_define_string(bind_phrase).encode("utf-8")).hexdigest()
+
+
 def binding_phrase_to_uid(bind_phrase: str) -> list[int]:
-    define = f'-DMY_BINDING_PHRASE="{bind_phrase}"'
-    digest = hashlib.md5(define.encode("utf-8")).digest()
+    digest = hashlib.md5(binding_define_string(bind_phrase).encode("utf-8")).digest()
     return list(digest[:6])
 
 
