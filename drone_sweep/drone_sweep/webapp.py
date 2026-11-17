@@ -34,13 +34,37 @@ FORM_FIELDS = (
 )
 
 
-def home_page() -> bytes:
+def home_page(ports: list[tuple[str, str]] | None = None) -> bytes:
     steps = "".join(f"<li>{html.escape(step)}</li>" for step in WORKFLOW)
+    choices = ports if ports is not None else []
+    if ports is None:
+        from .usb_read import describe_ports
+
+        choices = describe_ports()
+    if choices:
+        options = "".join(
+            f'<option value="{html.escape(device)}">{html.escape(label)}</option>'
+            for device, label in choices
+        )
+        usb = f"""
+<form class="connect" method="post" action="/usb">
+<select name="port" aria-label="USB-порт">{options}</select>
+<span class="baud">115200</span>
+<label class="folder">Папка <input name="out" value="strela-out" aria-label="Папка отчёта"></label>
+<button type="submit">Считать</button>
+</form>
+"""
+    else:
+        usb = '<p class="connect">Порт не виден. Подключите полётник кабелем USB и обновите страницу.</p>'
     inner = f"""
-<h1>{APP_NAME}</h1>
-<p class="lede">Соберите карточку дрона из файлов, которые уже лежат на компьютере. Пустая клетка остаётся пустой и говорит, чего не хватило.</p>
+<header class="topbar">
+<div class="brand">{APP_NAME}</div>
+{usb}
+</header>
+<h2>Подключение по USB</h2>
+<p class="lede">Выберите порт в верхней полосе и нажмите «Считать». Скорость 115200, как в списке конфигуратора. Программа сама отличит Betaflight, INAV, Cleanflight и MAVLink и снимет только чтение.</p>
 <div class="actions">
-<a class="action" href="/assemble">Собрать карточку</a>
+<a class="action quiet" href="/assemble">Собрать карточку из файлов</a>
 <a class="action quiet" href="/explain">Подсказки</a>
 </div>
 <h2>Порядок</h2>
@@ -59,6 +83,7 @@ def form_page() -> bytes:
         for name, title, help_text in FORM_FIELDS
     )
     inner = f"""
+<header class="topbar"><a class="brand" href="/">Стрела</a></header>
 <h1>Собрать карточку</h1>
 <p class="lede">Впишите пути к файлам на этом компьютере. Пустой путь пропускается. Программа ничего не пишет в полётник.</p>
 <form method="post" action="/assemble">
@@ -73,6 +98,7 @@ def form_page() -> bytes:
 def explain_page() -> bytes:
     steps = "".join(f"<li>{html.escape(step)}</li>" for step in WORKFLOW)
     inner = f"""
+<header class="topbar"><a class="brand" href="/">Стрела</a></header>
 <h1>Подсказки</h1>
 <p class="lede">Идите по шагам. Если клетка красная, прочитайте причину и сделайте только то, что написано рядом.</p>
 <ol class="steps">{steps}</ol>
@@ -94,17 +120,37 @@ class StrelaHandler(BaseHTTPRequestHandler):
             self._send(404, page("Нет страницы", "<h1>Такой страницы нет</h1><p><a class=\"action\" href=\"/\">Назад к Стреле</a></p>").encode("utf-8"))
 
     def do_POST(self) -> None:
-        if not self.path.startswith("/assemble"):
-            self._send(404, b"not found")
-            return
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length).decode("utf-8", errors="replace")
         form = {key: values[0] for key, values in parse_qs(raw).items()}
+        if self.path.startswith("/usb"):
+            self._read_usb(form)
+            return
+        if not self.path.startswith("/assemble"):
+            self._send(404, b"not found")
+            return
         if not form.get("out", "").strip():
             self._send(400, page("Нужна папка", "<h1>Укажите папку отчёта</h1><p><a class=\"action\" href=\"/assemble\">Назад к форме</a></p>").encode("utf-8"))
             return
         card = assemble(inputs_from_answers(form))
         saved = write_report(card, Path(form["out"].strip()))
+        self._send(200, render_html(card, saved_path=str(saved)).encode("utf-8"))
+
+    def _read_usb(self, form: dict[str, str]) -> None:
+        from .usb_read import ReadOnlyError, read_usb
+
+        picked = form.get("port", "").strip()
+        folder = form.get("out", "").strip()
+        if not picked or not folder:
+            self._send(400, page("Нужен порт", "<h1>Выберите USB-порт и папку отчёта</h1><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8"))
+            return
+        try:
+            card = assemble(read_usb(picked))
+        except (OSError, ReadOnlyError, ValueError) as exc:
+            body = page("Порт не ответил", f"<h1>Порт не ответил</h1><p>{html.escape(str(exc))}</p><p>Карточка не собрана.</p><p><a class=\"action\" href=\"/\">Назад</a></p>").encode("utf-8")
+            self._send(400, body)
+            return
+        saved = write_report(card, Path(folder))
         self._send(200, render_html(card, saved_path=str(saved)).encode("utf-8"))
 
     def log_message(self, fmt: str, *args) -> None:
@@ -118,7 +164,18 @@ class StrelaHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class ServeError(Exception):
+    pass
+
+
 def serve(port: int = 8765) -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", port), StrelaHandler)
-    print(f"{APP_NAME}: http://127.0.0.1:{port}")
-    server.serve_forever()
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), StrelaHandler)
+    except OSError as exc:
+        raise ServeError(f"Адрес 127.0.0.1:{port} занят ({exc}).") from exc
+    print(f"{APP_NAME}: http://127.0.0.1:{port}", flush=True)
+    print("Остановка: Ctrl+C", flush=True)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()

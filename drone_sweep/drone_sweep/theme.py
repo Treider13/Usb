@@ -1,8 +1,8 @@
-"""Field-card appearance shared by the menu and the report.
+"""Configurator-style chrome in red.
 
-The sheet is a paper form on a map-green table. Brass is only the top
-edge. Green, blue and red are ink stamps for the four statuses, not a
-dashboard palette.
+Betaflight Configurator paints a dark surface, a top bar, and a gold
+primary (`--color-primary-500` is #ffbb00) with a separate action button.
+This sheet keeps that layout. The gold is replaced by red.
 """
 
 from __future__ import annotations
@@ -10,118 +10,174 @@ from __future__ import annotations
 
 CSS = """
 :root {
-  --map: #243028;
-  --paper: #d9d3bf;
-  --ink: #1c1e18;
-  --brass: #8a7344;
-  --green: #1f4d32;
-  --blue: #1e3a5f;
-  --red: #8e2f2a;
-  --mute: #5c584e;
-  --quiet: #3a3d34;
+  --surface-100: hsl(0, 0%, 8%);
+  --surface-200: hsl(0, 0%, 12%);
+  --surface-300: hsl(0, 0%, 16%);
+  --text: hsl(0, 0%, 96%);
+  --muted: hsl(0, 0%, 68%);
+  --line: hsl(0, 0%, 22%);
+  --primary-500: #ff2b2b;
+  --primary-700: #9d1010;
+  --action: #e2123f;
+  --success: #96e212;
+  --info: #64a5f6;
+  --quiet: hsl(0, 0%, 72%);
+  --radius: 0.35rem;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  background: var(--map);
-  color: var(--ink);
-  font-family: "Liberation Sans", "Noto Sans", sans-serif;
-  font-size: 17px;
+  background: var(--surface-100);
+  color: var(--text);
+  font-family: "Segoe UI", "Liberation Sans", sans-serif;
+  font-size: 16px;
   line-height: 1.45;
 }
 .sheet {
-  max-width: 920px;
-  margin: 28px auto;
-  background: var(--paper);
-  border-top: 10px solid var(--brass);
-  padding: 28px 32px 48px;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 20px 48px;
+}
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 0 -20px 20px;
+  padding: 10px 16px;
+  background: #050505;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--primary-500);
+  text-decoration: none;
+}
+label.folder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--quiet);
+  font-size: 14px;
+}
+.connect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.baud {
+  min-width: 5.5rem;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-300);
+  color: var(--text);
+  text-align: center;
 }
 h1 {
-  font-family: "Liberation Serif", "DejaVu Serif", serif;
-  font-weight: 400;
-  font-size: 48px;
-  line-height: 1.05;
-  margin: 0 0 8px;
+  font-weight: 600;
+  font-size: 32px;
+  line-height: 1.15;
+  margin: 8px 0;
+  color: var(--text);
 }
 h2 {
-  font-family: "Liberation Serif", "DejaVu Serif", serif;
-  font-weight: 400;
-  font-size: 28px;
+  font-weight: 600;
+  font-size: 18px;
   line-height: 1.2;
-  margin: 32px 0 8px;
-  border-bottom: 1px solid var(--ink);
-  padding-bottom: 4px;
+  margin: 28px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  color: var(--primary-500);
 }
-p { max-width: 68ch; }
-.lede { font-size: 18px; }
+p { max-width: 72ch; }
+.lede { font-size: 16px; color: var(--text); }
 .banner { margin-top: 0; color: var(--quiet); }
 .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
 a.action, button {
   display: inline-block;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--action);
+  color: #fff;
   text-decoration: none;
-  padding: 10px 16px;
-  border: 0;
+  padding: 8px 16px;
+  border: 1px solid var(--primary-700);
+  border-radius: var(--radius);
   font: inherit;
+  font-weight: 700;
   cursor: pointer;
 }
 a.action.quiet {
   background: transparent;
-  color: var(--ink);
-  border: 1px solid var(--ink);
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-weight: 600;
 }
-a:focus, button:focus, input:focus {
-  outline: 2px solid var(--brass);
+a:focus, button:focus, input:focus, select:focus {
+  outline: 2px solid var(--primary-500);
   outline-offset: 2px;
 }
-ol.steps { padding-left: 1.2em; max-width: 68ch; }
+ol.steps { padding-left: 1.2em; max-width: 72ch; }
 ol.steps li { margin: 8px 0; }
 .legend { list-style: none; padding: 0; margin: 16px 0; display: grid; gap: 8px; }
 .legend li { display: flex; align-items: flex-start; gap: 8px; }
 .stamp {
   display: inline-block;
-  border: 1px solid var(--ink);
-  color: var(--ink);
+  border: 1px solid var(--text);
+  color: var(--text);
   padding: 1px 8px;
-  font-size: 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
   white-space: nowrap;
 }
-.cell.confirmed .stamp, .legend .confirmed .stamp { color: var(--green); border-color: var(--green); }
-.cell.document .stamp, .legend .document .stamp { color: var(--blue); border-color: var(--blue); }
-.cell.missing .stamp, .legend .missing .stamp { color: var(--red); border-color: var(--red); }
-.cell.not_applicable .stamp, .legend .not_applicable .stamp { color: var(--mute); border-color: var(--mute); }
+.cell.confirmed .stamp, .legend .confirmed .stamp { color: var(--success); border-color: var(--success); }
+.cell.document .stamp, .legend .document .stamp { color: var(--info); border-color: var(--info); }
+.cell.missing .stamp, .legend .missing .stamp { color: var(--primary-500); border-color: var(--primary-500); }
+.cell.not_applicable .stamp, .legend .not_applicable .stamp { color: var(--muted); border-color: var(--muted); }
 label .title { font-weight: 700; }
-.grid { display: grid; grid-template-columns: 1fr; }
-.cell { border-bottom: 1px solid rgba(28, 30, 24, 0.28); padding: 12px 16px 12px 0; }
-.cell h3 { margin: 0 0 4px; font-size: 17px; font-weight: 700; color: var(--ink); }
-.key { margin: 0; font-family: "JetBrains Mono", "Liberation Mono", monospace; font-size: 12px; color: var(--mute); }
+.grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.cell {
+  background: var(--surface-200);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.cell h3 { margin: 0 0 4px; font-size: 16px; font-weight: 700; color: var(--text); }
+.key { margin: 0; font-family: "JetBrains Mono", "Liberation Mono", monospace; font-size: 12px; color: var(--muted); }
 .value table { width: 100%; border-collapse: collapse; font-size: 14px; }
-.value th, .value td { border-bottom: 1px solid rgba(28, 30, 24, 0.2); text-align: left; padding: 3px 8px 3px 0; vertical-align: top; font-weight: 400; }
-.value th { width: 32%; }
+.value th, .value td { border-bottom: 1px solid var(--line); text-align: left; padding: 3px 8px 3px 0; vertical-align: top; font-weight: 400; }
+.value th { width: 32%; color: var(--quiet); }
 .value pre { white-space: pre-wrap; margin: 4px 0 10px; }
 .why, .src { margin: 0; font-size: 14px; color: var(--quiet); }
-.hole { border-left: 4px solid var(--red); padding: 4px 0 4px 12px; margin: 12px 0; }
+.hole { border-left: 4px solid var(--primary-500); padding: 4px 0 4px 12px; margin: 12px 0; }
 .hole p { margin: 4px 0; }
-label { display: block; margin: 16px 0; max-width: 68ch; }
+label { display: block; margin: 16px 0; max-width: 72ch; }
 .help { display: block; color: var(--quiet); font-size: 14px; }
-input {
+input, select {
   width: 100%;
   margin-top: 4px;
   padding: 8px;
-  background: #efeadd;
-  border: 1px solid var(--ink);
-  color: var(--ink);
+  background: var(--surface-300);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
   font: inherit;
 }
+.connect select, .connect input { width: auto; min-width: 16rem; margin: 0; }
 @media (min-width: 760px) {
   .legend { grid-template-columns: 1fr 1fr; }
   .grid { grid-template-columns: 1fr 1fr; }
   .cell.wide { grid-column: 1 / -1; }
 }
 @media (max-width: 640px) {
-  .sheet { margin: 0; padding: 20px 16px 36px; }
-  h1 { font-size: 36px; }
+  .sheet { padding: 0 12px 36px; }
+  .connect { margin-left: 0; width: 100%; }
+  .connect select, .connect input { min-width: 0; flex: 1 1 12rem; }
+  h1 { font-size: 26px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto; }

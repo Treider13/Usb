@@ -46,6 +46,8 @@ class Inputs:
     stm32_text: str | None = None
     banner: str = ""
     auth_declined: bool = False
+    mavlink_rows: list[dict] | None = None
+    read_note: str = ""
 
 
 def assemble(inputs: Inputs) -> Card:
@@ -74,9 +76,13 @@ def assemble(inputs: Inputs) -> Card:
     _radio_fields(card, inputs)
     _nameplates(card, inputs.nameplates)
     _stm32(card, inputs.stm32_text)
+    if inputs.mavlink_rows:
+        _absorb_mavlink(card, inputs.mavlink_rows, source="usb")
     _route(card, inputs, rows)
     _applicability(card)
     _holes(card)
+    if inputs.read_note:
+        card.holes.append(inputs.read_note)
     return card
 
 
@@ -349,25 +355,25 @@ def _betaflight_ports(card: Card, dump) -> None:
         )
 
 
-def _ardupilot_ports(card: Card, params: dict) -> None:
+def _ardupilot_ports(card: Card, params: dict, source: str = "bin PARM") -> None:
     ports = ardupilot_ports(params)
     if not ports:
-        card.put("serial_ports", missing("в PARM нет SERIALn_PROTOCOL и SERIALn_BAUD", "bin PARM"))
+        card.put("serial_ports", missing("в PARM нет SERIALn_PROTOCOL и SERIALn_BAUD", source))
         return
     card.put(
         "serial_ports",
-        confirmed(ports, "bin PARM", "SerialProtocol и map_baudrate из AP_SerialManager Copter 4.5"),
+        confirmed(ports, source, "SerialProtocol и map_baudrate из AP_SerialManager Copter 4.5"),
     )
     receivers = [port["port"] for port in ports if port.get("receiver")]
     if len(receivers) == 1:
         card.put(
             "receiver_port",
-            confirmed(receivers[0], "bin PARM", "протокол приёмника из SERIALn_PROTOCOL. Проход UART не включается."),
+            confirmed(receivers[0], source, "протокол приёмника из SERIALn_PROTOCOL. Проход UART не включается."),
         )
     elif not receivers:
-        card.put("receiver_port", missing("среди SERIALn_PROTOCOL нет протокола приёмника", "bin PARM"))
+        card.put("receiver_port", missing("среди SERIALn_PROTOCOL нет протокола приёмника", source))
     else:
-        card.put("receiver_port", missing("протоколы приёмника на нескольких портах: " + ", ".join(receivers), "bin PARM"))
+        card.put("receiver_port", missing("протоколы приёмника на нескольких портах: " + ", ".join(receivers), source))
 
 
 def _betaflight_video(card: Card, dump) -> None:
@@ -480,14 +486,14 @@ def _serialrx_class(card: Card, provider: str) -> None:
         )
 
 
-def _known_params(card: Card, params: dict) -> None:
+def _known_params(card: Card, params: dict, source: str = "bin PARM") -> None:
     if "RC_PROTOCOLS" in params:
         value = int(params["RC_PROTOCOLS"])
         card.put(
             "rc_protocols",
             confirmed(
                 {"value": value, "bits": rc_protocols_45(value)},
-                "bin PARM",
+                source,
                 "маска Copter 4.5: значение 1 — бит All, это не имя протокола линии",
             ),
         )
@@ -497,20 +503,20 @@ def _known_params(card: Card, params: dict) -> None:
             "mnt1_type",
             confirmed(
                 {"value": value, "label": MOUNT_TYPE_45.get(value, "unknown enum")},
-                "bin PARM",
+                source,
             ),
         )
     if "CAM1_TYPE" in params:
         value = int(params["CAM1_TYPE"])
         card.put(
             "cam1_type",
-            confirmed({"value": value, "label": CAMERA_TYPE_45.get(value, "unknown enum")}, "bin PARM"),
+            confirmed({"value": value, "label": CAMERA_TYPE_45.get(value, "unknown enum")}, source),
         )
     if "VTX_ENABLE" in params:
-        card.put("vtx_enable", confirmed(params["VTX_ENABLE"], "bin PARM"))
+        card.put("vtx_enable", confirmed(params["VTX_ENABLE"], source))
         card.put(
             "vtx_device_responded",
-            missing("опроса видеопередатчика не было. VTX_ENABLE не является ответом устройства.", "bin PARM"),
+            missing("опроса видеопередатчика не было. VTX_ENABLE не является ответом устройства.", source),
         )
     video = describe_ardupilot_vtx(params)
     if video is not None:
@@ -519,28 +525,28 @@ def _known_params(card: Card, params: dict) -> None:
             confirmed(video, "AP_VideoTX VIDEO_CHANNELS + PARM", "сохранённые параметры, не ответ передатчика"),
         )
         if video["stored_frequency_mhz"]:
-            card.put("video_frequency_mhz", confirmed(video["stored_frequency_mhz"], "bin PARM VTX_FREQ"))
+            card.put("video_frequency_mhz", confirmed(video["stored_frequency_mhz"], f"{source} VTX_FREQ"))
         elif video["table_frequency_mhz"] is not None:
             card.put(
                 "video_frequency_mhz",
                 confirmed(video["table_frequency_mhz"], "AP_VideoTX VIDEO_CHANNELS"),
             )
         else:
-            card.put("video_frequency_mhz", missing("VTX_FREQ пуст и BAND/CHANNEL вне таблицы", "bin PARM"))
+            card.put("video_frequency_mhz", missing("VTX_FREQ пуст и BAND/CHANNEL вне таблицы", source))
         if video["stored_frequency_mhz"] and video["table_frequency_mhz"] not in (None, video["stored_frequency_mhz"]):
             card.holes.append(
                 "VTX_FREQ и частота из VTX_BAND/VTX_CHANNEL по таблице AP_VideoTX не совпали. Оба значения сохранены."
             )
         if video["power_mw"] is not None:
-            card.put("video_power_mw", confirmed(video["power_mw"], "bin PARM VTX_POWER", "милливатты, как в параметре"))
+            card.put("video_power_mw", confirmed(video["power_mw"], f"{source} VTX_POWER", "милливатты, как в параметре"))
         if video["pitmode_bit"] is not None:
             card.put(
                 "vtx_pitmode_configured",
-                confirmed(video["pitmode_bit"], "bin PARM VTX_OPTIONS bit 0", "бит настройки, не ответ устройства"),
+                confirmed(video["pitmode_bit"], f"{source} VTX_OPTIONS bit 0", "бит настройки, не ответ устройства"),
             )
     for name in ("FS_THR_ENABLE", "FS_GCS_ENABLE", "FS_EKF_ACTION", "BATT_FS_CRT_ACT", "FS_CRASH_CHECK"):
         if name in params:
-            card.put(name.lower(), confirmed(params[name], "bin PARM"))
+            card.put(name.lower(), confirmed(params[name], source))
 
 
 def _baro(card: Card, rows: list[dict]) -> None:
@@ -676,18 +682,18 @@ def _nameplates(card: Card, plates: dict[str, str]) -> None:
         card.put(f"nameplate_{key}", document(value, "nameplate", "шильдик, не этот вылет и не протокол"))
 
 
-def _absorb_mavlink(card: Card, rows: list[dict]) -> None:
-    """Fields a .tlog actually contains: heartbeat, parameters, radio status, RC spacing."""
+def _absorb_mavlink(card: Card, rows: list[dict], source: str = "tlog") -> None:
+    """Fields a MAVLink stream actually contains: heartbeat, parameters, radio status, RC spacing."""
     beats = [row for row in rows if row.get("name") == "HEARTBEAT"]
     if beats:
         beat = {key: _plain(value) for key, value in beats[0].items() if key != "name"}
-        card.put("mavlink_heartbeat", confirmed(beat, "tlog HEARTBEAT"))
+        card.put("mavlink_heartbeat", confirmed(beat, f"{source} HEARTBEAT"))
         if card.family == "unknown":
             card.family = "ardupilot" if beat.get("autopilot") == 3 else "mavlink"
             card.raw_banner = card.raw_banner or "MAVLink HEARTBEAT"
     elif card.family == "unknown" and rows:
         card.family = "mavlink"
-        card.raw_banner = card.raw_banner or "MAVLink tlog"
+        card.raw_banner = card.raw_banner or f"MAVLink {source}"
     params: dict[str, Any] = {}
     for row in rows:
         if row.get("name") != "PARAM_VALUE":
@@ -696,9 +702,9 @@ def _absorb_mavlink(card: Card, rows: list[dict]) -> None:
         if name:
             params[name] = _plain(row.get("param_value"))
     if params and (card.fields.get("parameters") is None or card.fields["parameters"].status != "confirmed"):
-        card.put("parameters", confirmed(params, "tlog PARAM_VALUE"))
-        _known_params(card, params)
-        _ardupilot_ports(card, params)
+        card.put("parameters", confirmed(params, f"{source} PARAM_VALUE"))
+        _known_params(card, params, source=f"{source} PARAM_VALUE")
+        _ardupilot_ports(card, params, source=f"{source} PARAM_VALUE")
     radios = [row for row in rows if row.get("name") == "RADIO_STATUS"]
     if radios:
         kept = {
@@ -708,7 +714,7 @@ def _absorb_mavlink(card: Card, rows: list[dict]) -> None:
         }
         card.put(
             "mavlink_radio_status",
-            confirmed(kept, "tlog RADIO_STATUS", "качество линии из сообщения RADIO_STATUS, не пакетрейт"),
+            confirmed(kept, f"{source} RADIO_STATUS", "качество линии из сообщения RADIO_STATUS, не пакетрейт"),
         )
     stamps = sorted(
         float(row["time_boot_ms"])
@@ -722,7 +728,7 @@ def _absorb_mavlink(card: Card, rows: list[dict]) -> None:
             "mavlink_rc_interval_ms",
             confirmed(
                 deltas[len(deltas) // 2],
-                "tlog RC_CHANNELS",
+                f"{source} RC_CHANNELS",
                 "медиана шага записей RC_CHANNELS, не пакетрейт радиолинии",
             ),
         )
